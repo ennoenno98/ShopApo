@@ -115,7 +115,7 @@ has no public API. We automate the CSV export via Playwright:
   step is skipped.
 - First-run debugging: `python scripts/sa_tech_download.py --headed
   --debug` — opens a visible browser and saves a screenshot of every
-  step to `scripts/.sa_tech_screens/`. If a selector misses, the
+  step to `scripts/sa_tech_screens/`. If a selector misses, the
   screenshot tells you which element to target; edit the
   `SELECTOR_*` constants at the top of the script.
 - Fallback: you can still drop a manual UI export into the same folder

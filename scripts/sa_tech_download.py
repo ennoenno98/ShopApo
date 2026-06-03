@@ -28,7 +28,7 @@ The CSS selectors below are best-guess (the site sits behind a login,
 so they couldn't be inspected from the dev sandbox). If a step fails:
 
 1. Re-run with `--headed --debug`. Each step writes a screenshot to
-   `scripts/.sa_tech_screens/`.
+   `scripts/sa_tech_screens/`.
 2. Open the failing screenshot, right-click the element you'd click,
    copy its CSS selector or accessible name.
 3. Edit the corresponding SELECTOR_* constant at the top of this file.
@@ -75,7 +75,9 @@ SELECTOR_RUN_REPORT = 'button:has-text("Apply"), button:has-text("Run"), button:
 SELECTOR_DOWNLOAD = 'a:has-text("Download"), a:has-text("Export"), button:has-text("Download"), button:has-text("Export"), button:has-text("CSV"), a:has-text("CSV")'
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "inputs" / "shop_apotheke_ads"
-SCREEN_DIR = Path(__file__).resolve().parent / ".sa_tech_screens"
+# Plain dir name (no leading dot) so `actions/upload-artifact` picks it up
+# without needing include-hidden-files.
+SCREEN_DIR = Path(__file__).resolve().parent / "sa_tech_screens"
 
 
 logging.basicConfig(
@@ -147,7 +149,13 @@ def login(page, *, debug: bool) -> None:
     log.info("Loading login page %s", LOGIN_URL)
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
     # SPA login pages often hydrate after DOMContentLoaded.
-    page.wait_for_load_state("networkidle", timeout=20_000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    except PWTimeout:
+        log.warning("networkidle never reached — page may be making background requests forever; proceeding anyway")
+
+    log.info("After navigation: url=%s  title=%r  html_len=%d",
+             page.url, page.title(), len(page.content()))
     if debug:
         _shoot(page, "01_login_loaded")
         _dump_html(page, "01_login_loaded")
@@ -160,6 +168,16 @@ def login(page, *, debug: bool) -> None:
         _shoot(page, "02_login_no_email_field")
         _dump_html(page, "02_login_no_email_field")
         _dump_inputs(page)
+        log.info("Frames on this page:")
+        for fr in page.frames:
+            log.info("  · %s (url=%s)", fr.name or "<main>", fr.url)
+        # Try the much broader 'wait for any input' so we know if it's a timing
+        # issue versus the page genuinely not having a form.
+        try:
+            page.wait_for_selector("input", timeout=5_000)
+            log.info("`input` selector eventually matched — the form is hydrating slow.")
+        except PWTimeout:
+            log.info("`input` never matched either — page has no form inputs at all.")
         raise
 
     page.fill(SELECTOR_EMAIL, email)
@@ -175,7 +193,7 @@ def login(page, *, debug: bool) -> None:
         _shoot(page, "03_login_stuck")
         raise RuntimeError(
             "Did not navigate away from /login. Check credentials, or "
-            "look at the screenshot in scripts/.sa_tech_screens/ to "
+            "look at the screenshot in scripts/sa_tech_screens/ to "
             "identify the actual submit button selector."
         )
     log.info("Logged in.")

@@ -49,7 +49,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sa-tech-screens-${{ github.run_id }}
-          path: scripts/.sa_tech_screens/
+          path: scripts/sa_tech_screens/
           if-no-files-found: ignore
           retention-days: 14
 
