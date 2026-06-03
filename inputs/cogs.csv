@@ -1,3 +1,280 @@
-sku,unit_cogs,inbound_shipping
-VI-EXAMPLE-1,4.50,0.40
-VI-EXAMPLE-2,8.10,0.55
+sku,unit_cogs,product_name
+VV-VITA-90,6.32,Beta Carotin 180K
+VV-VITA-50,6.39,Colla-Veg Complex 120K
+VV-VITA-111,6.07,Colon Care 120K
+VV-VITA-63,4.22,Cordyceps sinensis 120K
+VV-VITA-39,5.89,D-Mannose Complex 120K
+CW-KVIN-V39Y,8.41,D-Mannose Pulver 250G
+VV-VITA-104,5.07,Echinacea (purpurea) Extract 120K
+VV-VITA-49,6.7,Eisen Bisglycinat 120K
+VV-VITA-102,6.08,Ginkgo Biloba Extrakt (50:1) 180K
+VV-VITA-122,4.76,Immu Pro 120K
+VV-VITA-129,3.99,Ingwer BIO 120K
+VV-VITA-116,5.05,Natürliches Jod BIO aus Kelp Alge 180K
+VI-ZU99-SZ0B,4.06,L-Tryptophan 120K
+VV-VITA-136,7.26,Light Legs Complex 120K
+VV-VITA-109,5.41,Liver Active 120K
+VV-VITA-119,5.01,Magnesium + Kalium 180K
+VV-VITA-02,4.73,"Mariendistel Extrakt, 120 Kapseln"
+VV-VITA-121,7.33,Female Harmony Complex 120K
+BJ-E223-8EKW,7.85,Moringa BIO 270K
+VV-VITA-86,7.95,MSM Kapseln 365K
+VV-ALO-06,7.4,MSM Pulver DOSE 1KG
+2R-49NC-R697,6.83,MSM Pulver 1KG
+VV-VITA-105,5.56,"Panax ginseng Extrakt, 120 Kapseln"
+VV-VITA-115,7.74,Pro Bio Kids 75g
+VV-VITA-94,9.5,Pro Bio Kulturenkomplex BIO 60K
+NX-CVPF-VCEZ,9.21,Reishi Extrakt 120K
+VV-VITA-101,7.77,Rhodiola rosea 120K
+VV-VITA-127,7.66,Safran Extrakt 120K
+VV-VITA-106,6.92,Schwarzer Knoblauch 120K
+VV-VITA-88,8.03,Chlorella BIO + Spirulina BIO 240K
+TU-QNYD-JRRX,3.92,Tribulus Terrestris 120K
+VV-VITA-38,3.27,Vitamin B Plus 180T
+VV-VITA-93,3.85,Vitamin B12 Spray 25ml
+VV-VITA-124,8.87,Natürliches Vitamin C BIO 180K
+CP-DQMG-RVN9,6.47,Wild Yams + Zink 120K
+VV-VITA-107,3.42,Zimt Ceylon Extrakt 120K
+VV-VITA-142,8.72,Prostaid 180K
+VV-VITA-143,8.99,"Vitamin B12 PLUS, 180 Kapseln"
+VV-VITA-57-V,16.78,Hyaluronsäure 180K
+VV-VITA-146,6.56,Spirulina BIO 300T
+VV-VITA-151,8.09,Female Balance Complex 180K
+VV-VITA-153,5.36,Ashwagandha BIO 180K
+VV-VITA-155,5.5,Reishi BIO 90K
+VV-VITA-157,4.2,Weissdorn BIO 60K
+VV-VITA-158,8.66,Glucosamin Complex 180K
+VV-VITA-159,7.83,EAA Essentielle Aminosäuren 300T
+VV-VITA-160,6.88,L-Arginin Plus 180K
+VV-VITA-168,7.59,Sun Care Complex 180K
+VV-VITA-165,10.73,Resveratrol + Nicotinamid 60K
+VV-VITA-166,5.69,Triphala BIO 180K
+VV-VITA-170,4.53,Vitamin B3 Nicotinamid (500 mg) 180K
+VV-VITA-173,5.45,Hericium BIO 60K
+VV-VITA-172,6.05,Maitake BIO 60K
+VV-VITA-174,6.57,Olivenblatt Extrakt 90K
+VV-VITA-171,12.23,Vision Care Complex 120K
+VV-VITA-181,4.87,Salbei BIO 120K
+VV-VITA-186,6.99,Chlorella BIO 180T
+VV-VITA-188,5.66,Brennnessel BIO 120K
+VV-VITA-189,5.51,Hagebutte BIO 180K
+VV-VITA-190,6.4,Papaya Extrakt BIO 120K
+VV-VITA-197,8.36,Guggul 120K
+VV-VITA-198,7.04,Bromelain 120K
+VV-VITA-199,5.29,Johanniskraut + Passionsblume BIO 90K
+VV-VITA-202,2.73,Multivitamin Spray Junior 25ml
+VV-VITA-203,5.79,GABA Plus 120K
+VV-VITA-204,5.01,Teufelskralle Plus 120K
+VV-VITA-206,5.06,Artischocke BIO 120K
+VV-VITA-208,7.57,Rosskastanie Plus BIO 120K
+VV-VITA-215,5.99,Ackerschachtelhalm BIO 90K
+VV-VITA-216,5.56,Kudzu Plus 180K
+VV-VITA-46,6.2,Multivitamine + Mineralstoffe 120K
+VV-VITA-223,8.85,Omega 3 Öl 90K
+VV-VITA-222,6.68,Schwarzkümmelöl BIO 180K
+VV-VITA-224,6.26,Vegan Essentials Vitaminkomplex 120K
+VV-VITA-225,8.81,Shilajit 90K
+VV-VITA-227,6.65,Nachtkerzen und Borretschöl BIO 90K
+VV-VITA-228,7.53,Vitamin D3 und K2 Öl 120K
+VV-VITA-230,8.89,Berberin + Schwarzer Knoblauch 90K
+VV-VITA-231,7.05,Myo-Inositol Complex 120K
+VV-VITA-237,4.16,Cholin Trio 90K
+VV-VITA-243,6.04,Multi Magnesium 180K
+VV-VITA-247,7.24,Astaxanthin Öl 60K
+VV-VITA-248,6.15,Oregano BIO-Öl 90K
+VV-VITA-249,6.2,Saccharomyces boulardii 90K
+VV-VITA-250,5.09,Brahmi BIO 180T
+VV-VITA-252,8.18,Shiitake 120K
+VV-VITA-256,8.02,Kürbiskernöl BIO 180K
+VV-VITA-257,8.65,Lecithin BIO 120K
+VV-VITA-258,4.93,Leinsamenöl BIO 120K
+VV-VITA-259,8.47,Mushroom Mix Complex 120K
+VV-VITA-262,6.33,Bilberry + Pine Bark BIO 90K
+VV-VITA-264,5.3,Beifuß Extrakt 180K
+VV-VITA-265,7.04,Ginkgo + Ginseng Extrakt 120K
+VV-VITA-266,5.94,Moringa BIO 1000 mg 180T
+VV-VITA-274,6.38,Cysti-Aid Complex 120K
+VV-VITA-276,7.95,Venaflux Complex 120K
+VV-VITA-277,3.48,Vitamin B12 Spray Junior 25ml
+VV-VITA-287,6.87,Natürliches Silizium BIO 120K
+VV-VITA-286,5.53,Saw palmetto + Pygeum africanum 90K
+VV-VITA-284,7.63,Chaga BIO 90K
+VV-VITA-207,5.79,Astragalus BIO 120K
+VV-VITA-295,5.83,Sugar Balance Complex 120K
+VV-VITA-297,7.12,Beta Carotin Plus (Öl) 120K
+VV-VITA-298,6.34,Black Maca + Tribulus 120K
+VV-VITA-301,4.05,ZMA Zink + Magnesium + Vitamin B6 120K
+VV-VITA-303,5.45,Drenaflux Complex 120K
+VV-VITA-304,4.26,Folat 120K
+VV-VITA-307,3.42,Vitamin B3 (54 mg Nicotinamid) 180K
+VV-VITA-308,7.62,Digestive Enzymes Complex 120K
+VV-VITA-310,5.02,Bergamotte Extrakt 120K
+VV-VITA-311,5.48,NAC N-Acetyl-L-Cystein 180K
+VV-VITA-183,8.64,Reflu-X 120K
+VV-VITA-313,4.89,Boswellia Extrakt 120K
+VV-VITA-314,3.25,Glycin Pulver 1000g
+VV-VITA-316,5.92,Zimt Ceylon Extrakt BIO 120K
+VV-VITA-317,6.5,L-Citrullin Plus 150K
+VV-VITA-318,4.77,Knoblauch Plus 90K
+VV-VITA-319,5.97,Chia Öl BIO 120K
+VV-VITA-320,6.37,Veganes Collagen + Hyaluronsäure 120K
+VV-VITA-326,6.56,Griffonia Plus 90K
+VV-VITA-327,7.08,L-Carnitin Plus 120K
+VV-VITA-329,5.69,Vitamin C liposomal 120K
+VV-VITA-331,6.18,Nootropic Pro 90K
+VV-VITA-333,5.08,Elektrolyte Plus 120K
+VV-VITA-345,8.38,Serenity 90K
+VV-VITA-336,5.07,Teufelskralle BIO 90K
+VV-VITA-337,7.81,Rocket für Männer 60K
+VV-VITA-338,6,Curcuma BIO 120K
+VV-VITA-339,6.93,L-Tyrosin Plus 180K
+VV-VITA-340,5.84,Mariendistel Plus 120K
+VV-VITA-341,5.27,Vitamin B12 Tropfen 60ml
+VV-VITA-342,6.62,Vitamin D3 + K2 Tropfen 60ml
+VV-VITA-343,8.73,Chlorophyll Tropfen 60ml
+VV-VITA-344,8.82,KSM-66 BIO 180K
+VV-VITA-346,3.18,Chrom Plus 180K
+VV-VITA-348,8.52,Pregnancy 60K
+VV-VITA-349,4.27,Bockshornklee BIO 120K
+VV-VITA-350,4.27,FenoLact 90K
+VV-VITA-351,5.43,Cordyceps sinensis BIO 60K
+VV-VITA-352,8.3,Omega-3 Plus ADEK 60K
+VV-VITA-353,3.05,L-Tryptophan UK 120K
+VV-VITA-354,7.66,Mushroom Mix BIO 90K
+VV-VITA-355,8.39,L-Glutathion Complex 90K
+VV-VITA-250,4.96,"UMGEBUCHT - Brahmi BIO, 180 Tabletten"
+VV-VITA-356,5.29,Black Maca Plus 120K
+VV-VITA-357,3.91,Taurin Plus 90K
+VV-VITA-358,7.92,OPC Trio 120K
+VV-VITA-247,7.1,"Nachfolgeprodukt - Astaxanthin Öl, 60 Kapseln"
+VV-VITA-57-V2,8.72,Hyaluronsäure 90K
+VV-VITA-359,5.78,Roter Reis Plus 120K
+VV-VITA-360,4.18,Koffein 120K
+VV-VITA-361,5.44,Rapunzel Haut Haare Nägel 120K
+VV-VITA-362,6.53,Echinacea Plus 120K
+VV-VITA-363,5.01,Apple Cider Vinegar 120K
+VV-VITA-364,7.93,BIO Astaxanthin Öl 60K
+VV-VITA-365,3.38,Apple Cider Vinegar 90FG
+VV-VITA-366,3.42,Eisen 90FG
+VV-VITA-313,4.83,"Nachfolgeprodukt - Boswellia Extrakt, 120 Kapseln"
+VV-VITA-367,5.35,Creatin Monohydrat Pulver 500G
+VV-VITA-368,5.35,L-Glutamin Pulver 500G
+VV-VITA-369,5.22,Glucomannan BIO 90K
+VV-VITA-370,5.01,Magnesium Bisglycinat 180K
+VV-VITA-371,4.76,Nattokinase 180K
+VV-VITA-372,12.78,Vitamin D3 + K2 Depot 60K
+VV-VITA-331,6.18,"Nachfolgeprodukt - Nootropic Pro, 90 Kapseln"
+VV-VITA-373,3.81,Keto Power 60K
+VV-VITA-374,5.36,Psyllium BIO 400g
+VV-VITA-375,4.81,Strong Bones Kalzium Magnesium 180T
+VV-VITA-337,7.79,"Nachfolgeprodukt - Rocket, 60 Kapseln"
+VV-VITA-376,4.84,Griffonia 90K
+VV-VITA-377,4.05,Cholin Bitartrat 120 K
+VV-VITA-378,3.81,Brewers Yeast 120 K
+VV-VITA-379,4.87,Glucosamin Plus 120 K
+VV-VITA-380,2.87,Party Hero 60 T
+VV-VITA-381,3.42,Myo-Inositol Pulver 200g
+VV-VITA-382,5.08,Taurin Pulver 1000g
+VV-VITA-346,3.18,"UMGEBUCHT Chrom Plus, 90 Kapseln"
+VV-VITA-369,5.22,"UMGEBUCHT - Glucomannan BIO, 90 Kapseln"
+VV-VITA-383,5.12,Vitamin K2 180 T
+VV-VITA-384,3.65,Beta-Alanin Pulver 500g
+VV-VITA-284,7.63,"UMGEBUCHT - Chaga BIO, 120 Kapseln"
+VV-VITA-385,6.27,Nachtkerzen Öl 120K
+VV-VITA-386,9.2,Femme Biotics Bakterienkulturen 60K
+VV-VITA-387,11.01,Youth Biotics Bakterienkulturen 60K
+VV-VITA-388,1.67,Glycin Pulver 300g
+VV-VITA-389,9.81,Prosta-X 180K
+VV-VITA-142,8.82,"UMGEBUCHT - Prostaid Complex, 180 Kapseln"
+VV-VITA-39,5.89,"Nachfolgeprodukt - D-Mannose Complex, 120 Kapseln"
+VV-VITA-49,6.7,"UMGEBUCHT - Eisen Bisglycinat, 120 Kapseln"
+VV-VITA-360,4.36,"Nachfolgeprodukt - Koffein, 120 Kapseln"
+VV-VITA-370,5.01,"Nachfolgeprodukt - Magnesium Bisglycinat, 180 Kapseln"
+VV-VITA-136,7.26,"UMGEBUCHT - Light Legs Complex, 120 Kapseln"
+VV-VITA-63,4.22,"Nachfolgeprodukt - Cordyceps Extrakt, 120 Kapseln"
+VV-VITA-390,10.32,L-Citrullin Malat Pulver 500g
+VV-VITA-391,7.64,Quercetin Komplex 120K
+VV-VITA-203,5.67,"Nachfolgeprodukt - Gaba Plus, 120 Kapseln"
+VV-VITA-215,5.99,"Nachfolgeprodukt - Ackerschachtelhalm BIO, 90 Kapseln"
+VV-VITA-222,6.56,"Nachfolgeprodukt - Schwarzkümmelöl BIO, 180 Kapseln"
+VV-VITA-320,6.12,"UMGEBUCHT - Vegan Collagen+Hyaluronic Acid, 120 Kapseln"
+NX-CVPF-VCEZ,9.08,"UMGEBUCHT - Reishi Extrakt, 120 Kapseln"
+VV-VITA-143,9.24,"UMGEBUCHT - Vitamin B12 PLUS, 180 Kapseln"
+VV-VITA-198,6.92,"Nachfolgeprodukt - Bromelain 2500 GDU/g, 120 Kapseln"
+VV-VITA-105,5.16,"UMGEBUCHT Panax ginseng Extrakt, 120 Kapseln"
+VV-VITA-119,5.01,"Nachfolgeprodukt - Magnesium + Kalium, 180 Kapseln"
+VV-VITA-230,8.89,"UMGEBUCHT - Berberin + Schwarzer Knoblauch, 90 Kapseln"
+VV-VITA-346,3.18,"UMGEBUCHT Chrom Plus, 90 Kapseln"
+VV-VITA-231,7.05,"UMGEBUCHT - Myo-Inositol Complex, 120 Kapseln"
+NX-CVPF-VCEZ,9.21,"Nachfolgeprodukt - Reishi Extrakt, 120 Kapseln"
+VV-VITA-222,7.55,"NACHFOLGER Schwarzkümmelöl BIO, 180 Kapseln"
+VV-VITA-336,5.07,"UMGEBUCHT - Teufelskralle BIO, 90 Kapseln"
+VV-VITA-121,7.33,"UMGEBUCHT Female Harmony Complex, 120 Kapseln"
+VV-VITA-392,4.36,GABA 90K
+VV-VITA-393,7.28,BCAA Pulver 450g
+VV-VITA-394,7.07,EAA Pulver Essentielle Aminosäuren 400g
+VV-VITA-395,6.22,Zink 300K
+VV-VITA-63,4.22,"UMGEBUCHT-2 - Cordyceps Extrakt, 120 Kapseln"
+VV-VITA-94,9.77,"UMGEBUCHT - Probio Flora, 60 Kapseln"
+VV-VITA-171,12.23,"Nachfolgeprodukt - Vision Care Complex, 120 Kapseln"
+VV-VITA-372,12.78,"UMGEBUCHT - Vitamin D3 + K2 Depot, 90 Tabletten"
+VV-VITA-119,5.01,"UMGEBUCHT - Magnesium + Kalium, 180 Kapseln"
+VV-VITA-379,5.15,"Nachfolgeprodukt - Glucosamin Plus, 120 Kapseln"
+VV-VITA-174,6.9,"Nachfolgeprodukt - Olivenblatt (40% Oleuropein), 90 Kapseln"
+VV-VITA-90,6.32,"UMGEBUCHT - Beta Carotin, 180 Kapseln"
+VV-VITA-127,7.63,"Nachfolgeprodukt - Safran Extrakt, 120 Kapseln"
+VV-VITA-223,8.85,"Nachfolgeprodukt - Omega-3 Öl, 90 Kapseln"
+CP-DQMG-RVN9,6.79,"Nachfolgeprodukt - Wild Yams + Zink, 120 Kapseln"
+VV-VITA-208,7.57,"Nachfolgeprodukt - Rosskastanie Plus BIO, 120 Kapseln"
+VV-VITA-199,5.29,"UMBUCHUNG nicht möglich - Johanniskraut mit Passionsblume BIO, 90 Kapseln"
+VV-VITA-204,5.2,"Nachfolgeprodukt - Teufelskralle Plus, 120 Kapseln"
+VV-VITA-318,4.77,"UMGEBUCHT - Knoblauch Plus, 90 Kapseln"
+VV-VITA-256,8.02,"Nachfolgeprodukt - Kürbiskernöl BIO, 180 Kapseln"
+VV-VITA-276,7.82,"UMGEBUCHT - Venaflux Complex, 120 Kapseln"
+VV-VITA-310,5.02,"UMGEBUCHT - Bergamotte Extrakt, 120 Kapseln"
+VV-VITA-243,6.33,"Nachfolgeprodukt - Multi Magnesium Complex, 180 Kapseln"
+VV-VITA-341,5.27,"UMGEBUCHT - Vitamin B12 Tropfen, 50 ml"
+VV-VITA-342,6.62,"UMGEBUCHT- Vitamin D3+K2 Tropfen, 31 ml"
+VV-VITA-222-V,10.85,Bio Schwarzkümmelöl 300K
+VV-VITA-396,2.74,MSM 300g
+VV-VITA-225-V,16.11,Shilajit Mumijo 180K
+VV-VITA-122-V,8.51,Immu Pro 240K
+VV-VITA-49-V2,12.42,Eisen Plus 240K
+VV-VITA-363-V,9.68,Apple Cider Vinegar 240K
+VV-VITA-397,17.44,Reishi 240K
+VV-VITA-101,7.77,"Nachfolgeprodukt - Rhodiola rosea Extrakt, 120 Kapseln"
+VV-VITA-46,6.2,"UMGEBUCHT - Multivitamin Plus, 120 Kapseln"
+VV-VITA-122,4.75,"Nachfolgeprodukt - Immu Pro Complex, 120 Kapseln"
+VV-VITA-344,7.56,"UMGEBUCHT - KSM-66 BIO, 180 Kapseln"
+VV-VITA-364,7.93,"UMGEBUCHT - BIO Astaxanthin Öl, 60 Kapseln"
+VV-VITA-248,6.15,"UMGEBUCHT - Oregano Öl BIO, 90 Kapseln"
+VV-VITA-129,3.99,"Nachfolgeprodukt - Ingwer BIO, 120 Kapseln"
+VV-VITA-304,4.26,"Nachfolgeprodukt - Folat, 120 Kapseln"
+VV-VITA-124,8.87,"Nachfolgeprodukt - Vitamin C BIO aus Acerola, 180 Kapseln"
+VV-VITA-329,5.69,"Nachfolgeprodukt - Vitamin C liposomal, 120 Kapseln"
+VV-VITA-339,6.92,"Nachfolgeprodukt - L-Tyrosin Plus, 180 Kapseln"
+VV-VITA-398,3.35,Multi Gummies Kids 60GUMS
+VV-VITA-320-V,11.67,Vegan Collagen + Hyaluronic Acid 240K
+VV-VITA-355-V,16.14,L-Glutathion 180K
+VV-VITA-198-V,13.1,Bromelain 240K
+VV-VITA-399,6.91,Glucomannan Complex 180K
+VV-VITA-401,4.78,Mönchspfeffer 240K
+VV-VITA-402,7.17,UN-BLOAT 120K
+VV-VITA-403,6.22,Magnesiumcitrat Pulver 500g
+VV-VITA-338,6.96,"UMGEBUCHT - Curcuma BIO, 120 Kapseln"
+VV-VITA-404,6.53,Salbei Extrakt 120K
+VV-VITA-370-V,9.1,Magnesium Bisglycinat 365K
+VV-VITA-248-V,11.8,Oregano BIO-Öl 180K
+VV-VITA-405,3.8,Vitamin B12 180T DE
+VV-VITA-406,4.68,Vitamin B12 180T non-DE
+VV-VITA-31,5.48,"UMGEBUCHT - Papaya Enzym, 120 Kapseln"
+VV-VITA-407,8.83,Green Supreme 270g
+VV-VITA-408,7.05,Gut Routine 300g
+VV-VITA-308,7.18,"Nachfolgeprodukt - Digestive Enzymes, 180 Kapseln"
+VV-VITA-311,5.77,"Nachfolgeprodukt - NAC, 180 Kapseln"
+VV-VITA-237,4.41,"Nachfolgeprodukt - Cholin Trio, 90 Kapseln"
+VV-VITA-122-V,8.5,"Nachfolgeprodukt - Immu Pro Complex, 240 Kapseln"
+VV-VITA-370-V,9.1,"Nachfolgeprodukt - Magnesium Bisglycinat, 365 Kapseln"
+BJ-E223-8EKW,8.15,"Nachfolgeprodukt - Moringa BIO, 270 Kapseln"
+VV-VITA-190,6.4,"Nachfolgeprodukt - Papaya BIO, 120 Kapseln"
+VV-VITA-49,6.38,"Eisen Bisglycinat, 120 Kapseln"

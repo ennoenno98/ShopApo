@@ -1,44 +1,78 @@
 # Shop Apotheke — Weekly Margin Dashboard
 
-Weekly Streamlit dashboard for Vanatari's Shop Apotheke marketplace
-business, fed by:
+Weekly Streamlit dashboard for Vanatari's Shop Apotheke marketplace,
+fed by:
 
 - **Orders** — Shop Apotheke (Mirakl) seller API
 - **Ad spend** — Bing Ads, TikTok Ads, Shop Apotheke on-site (CSV drop)
-- **COGS / shipping** — user-provided CSVs in `inputs/`
+- **COGS / shipping / VAT** — reference CSVs in `inputs/` (seeded from
+  the `Margen Calc pharma` sheet of `Margin_Check_V5.xlsx`)
 
-The pattern mirrors [`ennoenno98/Margin-Analytics`](https://github.com/ennoenno98/Margin-Analytics):
 GitHub Actions runs the export every Monday, commits the snapshot to
-`exports/`, and Streamlit Community Cloud auto-redeploys.
+`exports/`, and Streamlit Community Cloud auto-redeploys — same pattern
+as [`ennoenno98/Margin-Analytics`](https://github.com/ennoenno98/Margin-Analytics).
+
+## Margin model
+
+Mirrors `Margen Calc pharma` from the master workbook.
+
+```
+net_revenue       = (gross_revenue − refunds) / (1 + vat[country])
+product_cost      = unit_cogs × qty                   (× 0.83 if country == GB)
+
+CM1               = net_revenue − product_cost                          (gross product margin)
+
+shipping_cost     = DHL_rate[country, peak?] × qty                      (€ gross we pay)
+shipping_cost_net = shipping_cost / (1 + vat[country])
+commission        = 0.16 × gross_revenue                                (Shop Apotheke fee)
+overhead          = 0.10 × (net_revenue + shipping_cost_net)            (logistics)
+
+CM2               = CM1 − shipping_cost_net − commission − overhead
+CM3               = CM2 − allocated_ad_spend
+```
+
+Notable specifics (all from the workbook):
+- **VAT** uses the pharma-reduced rate: DE 7%, FR 5.5%, IT/ES 10%, etc.
+- **DHL peak surcharge** (+0.19 €) applies in November and December.
+- **Shipping revenue** the customer pays goes to Shop Apotheke, not the
+  seller, so it is *not* added back into CM2.
+- **GB COGS × 0.83** — the workbook treats GB COGS in GBP via a fixed FX.
+
+All knobs live as constants in `margin_model.py` if you need to tune them.
 
 ## Layout
 
 | Path | Role |
 | --- | --- |
-| `connectors/shop_apotheke.py`   | Mirakl OR11 orders endpoint. |
-| `connectors/bing_ads.py`        | Microsoft Ads reporting API. |
-| `connectors/tiktok_ads.py`      | TikTok Marketing API v1.3. |
-| `connectors/shop_apotheke_ads.py` | Shop Apotheke on-site ads — CSV drop in `inputs/shop_apotheke_ads/`. |
-| `weekly_export.py`              | Orchestrator: pulls sources, joins with COGS + shipping, writes the snapshot. |
-| `inputs/cogs.csv`               | Your per-SKU unit COGS + inbound shipping. |
-| `inputs/shipping.csv`           | Your per-SKU outbound shipping cost. |
-| `inputs/campaign_sku_map.csv`   | (Optional) campaign → SKU map for direct ad attribution. |
-| `exports/shopapo_export_*.csv.gz` | Weekly snapshots (committed by the Action). |
-| `streamlit_app.py`              | Password-gated dashboard. |
+| `connectors/shop_apotheke.py`    | Mirakl `GET /api/orders` (OR11). |
+| `connectors/bing_ads.py`         | Microsoft Ads reporting API. |
+| `connectors/tiktok_ads.py`       | TikTok Marketing API v1.3. |
+| `connectors/shop_apotheke_ads.py`| Shop Apotheke on-site ads — CSV drop in `inputs/shop_apotheke_ads/` (no public API). |
+| `margin_model.py`                | The ePharma margin model + a single-row `quote()` for the calculator tab. |
+| `weekly_export.py`               | Orchestrator: pulls sources, computes margins, writes the snapshot. |
+| `streamlit_app.py`               | Password-gated dashboard. Tabs: Overview, Weekly trend, SKU detail, Country, Ad spend, **Margin calculator** (interactive mirror of `Margen Calc pharma`). |
+| `inputs/cogs.csv`                | Per-SKU unit COGS (seeded from `cogs jtl`). |
+| `inputs/dhl_shipping.csv`        | DHL rate card per country, standard + peak. |
+| `inputs/vat_rates.csv`           | Country → pharma-reduced VAT rate. |
+| `inputs/shop_apotheke_shipping_revenue.csv` | What customers pay for shipping (reference; not used in CM2). |
+| `inputs/campaign_sku_map.csv`    | (Optional) campaign → SKU for direct ad attribution. |
+| `inputs/shop_apotheke_ads/*.csv` | Drop weekly on-site ad exports here. |
+| `exports/shopapo_export_*.csv.gz`| Weekly snapshots (committed by the Action). |
 | `.github/workflows/weekly_export.yml` | Schedules the export. |
 
 ## Required secrets
 
-Set these in **GitHub → Settings → Secrets → Actions** (for the workflow)
-and in **Streamlit Cloud → App settings → Secrets** (for the dashboard
-password):
+Set in **GitHub → Settings → Secrets and variables → Actions** *and* in
+**Streamlit Cloud → App settings → Secrets**:
 
-```
+```toml
 # Streamlit dashboard
 DASHBOARD_PASSWORD       = "..."
 
-# Shop Apotheke seller API
+# Shop Apotheke (Mirakl)
 SHOP_APOTHEKE_API_KEY    = "..."
+# Optional override if the marketplace endpoint moves:
+# SHOP_APOTHEKE_BASE_URL = "https://shop-apotheke.mirakl.net/api"
 
 # Microsoft (Bing) Ads
 BING_DEVELOPER_TOKEN     = "..."
@@ -53,84 +87,47 @@ TIKTOK_ACCESS_TOKEN      = "..."
 TIKTOK_ADVERTISER_ID     = "..."
 ```
 
-Missing credentials for any connector just skip that source — the
-snapshot is still written from whatever did succeed.
-
-## COGS + shipping inputs
-
-Fill these CSVs in `inputs/` with one row per SKU:
-
-`cogs.csv` — landed unit cost:
-```
-sku,unit_cogs,inbound_shipping
-VI-ABC-123,4.50,0.40
-```
-
-`shipping.csv` — the carrier cost *you* pay to ship one unit:
-```
-sku,unit_outbound_shipping
-VI-ABC-123,2.20
-```
-
-`campaign_sku_map.csv` *(optional)* — pin a campaign's spend to a
-specific SKU instead of letting the orchestrator split it across SKUs by
-daily net revenue:
-```
-channel,campaign,sku
-tiktok,1234567890,VI-ABC-123
-bing,Brand - Vegavero,VI-XYZ-999
-```
+Missing credentials for any one connector skip that source — the snapshot
+is still written from whatever did succeed.
 
 ## Shop Apotheke on-site ads
 
-There's no public API for the Shop Apotheke sponsored-products platform,
-so each week:
+There's no public API for the Shop Apotheke sponsored-products platform.
+Each week:
 
-1. In the Shop Apotheke ads UI: **Reports → Performance → Export → CSV**.
-2. Drop the file into `inputs/shop_apotheke_ads/` and commit. Any extra
-   columns are ignored; the connector needs `date, campaign, spend`
-   plus the optional `impressions, clicks, conversions, revenue`.
+1. In the ads UI: **Reports → Performance → Export → CSV**.
+2. Drop the file into `inputs/shop_apotheke_ads/` and commit. Required
+   columns: `date, campaign, spend`. Optional: `impressions, clicks,
+   conversions, revenue`.
 
-When/if an API becomes available, swap the body of
-`connectors/shop_apotheke_ads.py` — the orchestrator contract stays the
-same.
-
-## Margin definition
-
-```
-net_revenue    = gross_revenue − refunded_amount
-CM1            = net_revenue − cogs − inbound_shipping            (gross product margin)
-CM2            = CM1 − marketplace_commission − outbound_shipping
-                     + shipping_revenue                            (operating margin)
-CM3            = CM2 − allocated_ad_spend                          (final P&L margin)
-```
-
-Ad spend is allocated to SKUs:
-1. Direct: anything in `inputs/campaign_sku_map.csv` lands 1:1.
-2. Remainder: split daily across SKUs in proportion to net revenue.
+When/if an API ships, swap the body of `connectors/shop_apotheke_ads.py`
+— the orchestrator's contract (return columns) stays the same.
 
 ## Local dev
 
 ```bash
 pip install -r requirements.txt -r requirements-export.txt
 
-# Set credentials (or use a .env)
-export SHOP_APOTHEKE_API_KEY=...
+export SHOP_APOTHEKE_API_KEY="..."
 export DASHBOARD_PASSWORD="pick-something"
-# (other ad-platform vars optional — missing connectors are skipped)
+# Ad platform vars optional — missing connectors are skipped.
 
 python weekly_export.py --once
 streamlit run streamlit_app.py
 # → http://localhost:8501
 ```
 
-## Deploying the dashboard
+The **Margin calculator** tab works without a snapshot, so you can test
+the model end-to-end before wiring up the APIs.
+
+## Deploying
 
 **Streamlit Community Cloud** (same as Margin-Analytics):
 1. <https://share.streamlit.io> → **Create app → Deploy a public app**.
-2. Repo: `ennoenno98/ShopApo`, branch: `claude/awesome-hamilton-X7w62`
-   (or `main` after merging), main file: `streamlit_app.py`.
-3. Secrets → paste `DASHBOARD_PASSWORD = "..."`.
+2. Repo: `ennoenno98/ShopApo`, branch:
+   `claude/awesome-hamilton-X7w62` (or `main` after merging), main file:
+   `streamlit_app.py`.
+3. Secrets → at minimum `DASHBOARD_PASSWORD = "..."`.
 4. Push → auto-redeploy.
 
 ## What runs when
@@ -139,4 +136,4 @@ streamlit run streamlit_app.py
 | --- | --- |
 | Monday 05:30 UTC (cron) | Action runs `weekly_export.py --once`, commits the new snapshot. |
 | Push to deployed branch | Streamlit redeploys, picks up the new snapshot. |
-| **Actions → Run workflow** | Same as the cron — manual refresh. |
+| **Actions → Run workflow** | Manual refresh. |
