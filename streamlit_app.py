@@ -226,10 +226,12 @@ with tab_overview:
         ], columns=["Line", "€", "kind"])
         pnl["%"] = pnl["€"] / nr * 100
 
+        subtotal_idx = set(pnl.index[pnl["kind"] == "="])
+
         def _row_style(row):
-            if row["kind"] == "=":
-                return ["background:#F2F4F8; font-weight:600"] * len(pnl.columns)
-            return [""] * len(pnl.columns)
+            if row.name in subtotal_idx:
+                return ["background:#F2F4F8; font-weight:600"] * len(row)
+            return [""] * len(row)
 
         st.markdown(f"**Estimated P&L until CM3** — window "
                     f"{pd.Timestamp(start).date()} → {pd.Timestamp(end).date()} · "
