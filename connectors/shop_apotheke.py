@@ -34,6 +34,33 @@ log = logging.getLogger(__name__)
 DEFAULT_BASE = "https://shopapotheke.mirakl.net/api"
 PAGE_SIZE = 100
 
+# Mirakl OR11 returns country names (sometimes full English, sometimes the
+# native language) on `customer.shipping_address.country`. Normalize to the
+# 2-letter ISO codes the margin model + reference CSVs use.
+COUNTRY_TO_ISO = {
+    "GERMANY": "DE", "DEUTSCHLAND": "DE",
+    "AUSTRIA": "AT", "ÖSTERREICH": "AT", "OESTERREICH": "AT",
+    "FRANCE": "FR", "FRANKREICH": "FR",
+    "ITALY": "IT", "ITALIA": "IT", "ITALIEN": "IT",
+    "SPAIN": "ES", "ESPAÑA": "ES", "ESPANA": "ES", "SPANIEN": "ES",
+    "NETHERLANDS": "NL", "NIEDERLANDE": "NL",
+    "BELGIUM": "BE", "BELGIEN": "BE", "BELGIQUE": "BE",
+    "POLAND": "PL", "POLEN": "PL", "POLSKA": "PL",
+    "SWITZERLAND": "CH", "SCHWEIZ": "CH", "SUISSE": "CH",
+    "UNITED KINGDOM": "GB", "GREAT BRITAIN": "GB",
+    "IRELAND": "IE", "IRLAND": "IE",
+    "SWEDEN": "SE", "SCHWEDEN": "SE",
+}
+
+
+def _normalize_country(value: str | None) -> str | None:
+    if not value:
+        return None
+    v = value.strip().upper()
+    if len(v) == 2:
+        return v
+    return COUNTRY_TO_ISO.get(v, v)
+
 
 def _client():
     key = os.environ.get("SHOP_APOTHEKE_API_KEY")
@@ -91,7 +118,9 @@ def fetch(start: datetime, end: datetime) -> pd.DataFrame:
     for o in _iter_orders(session, base, start, end):
         created = o.get("created_date") or o.get("date_created")
         period = pd.to_datetime(created, errors="coerce", utc=True)
-        country = (o.get("customer", {}) or {}).get("shipping_address", {}).get("country")
+        country = _normalize_country(
+            (o.get("customer", {}) or {}).get("shipping_address", {}).get("country")
+        )
         for line in o.get("order_lines", []) or []:
             qty = float(line.get("quantity") or 0)
             unit_price = float(line.get("price_unit") or line.get("price") or 0)
