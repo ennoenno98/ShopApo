@@ -205,7 +205,42 @@ with tab_overview:
     if show_calculator_only:
         st.info("Snapshot not available — use the Margin calculator tab.")
     else:
-        # ---- Daily revenue × CM trend (top of overview) ----
+        # ---- Estimated P&L until CM3 (€ + % of net revenue) ----
+        agg = f[["gross_revenue", "refunded", "net_revenue", "product_cost",
+                 "commission", "shipping_cost_net", "overhead",
+                 "CM1", "CM2", "ad_spend", "CM3"]].sum(numeric_only=True)
+        nr = agg["net_revenue"] or 1  # avoid div-by-zero; absolutes still meaningful
+        pnl = pd.DataFrame([
+            ("Gross revenue",        agg["gross_revenue"],     "+"),
+            ("− Refunds",           -agg["refunded"],           ""),
+            ("Net revenue",          agg["net_revenue"],       "="),
+            ("− Product cost",      -agg["product_cost"],      ""),
+            ("CM1",                  agg["CM1"],               "="),
+            ("− Marketplace commission (16%)", -agg["commission"], ""),
+            ("− Outbound shipping (net)",      -agg["shipping_cost_net"], ""),
+            ("− Logistics overhead (10%)",     -agg["overhead"], ""),
+            ("CM2",                  agg["CM2"],               "="),
+            ("− Ad spend",          -agg["ad_spend"],           ""),
+            ("CM3",                  agg["CM3"],               "="),
+        ], columns=["Line", "€", "kind"])
+        pnl["%"] = pnl["€"] / nr * 100
+
+        def _row_style(row):
+            if row["kind"] == "=":
+                return ["background:#F2F4F8; font-weight:600"] * len(pnl.columns)
+            return [""] * len(pnl.columns)
+
+        st.markdown(f"**Estimated P&L until CM3** — window "
+                    f"{pd.Timestamp(start).date()} → {pd.Timestamp(end).date()} · "
+                    f"% of Net Revenue (€{nr:,.0f})")
+        st.dataframe(
+            pnl[["Line", "€", "%"]].style.format({
+                "€": "€{:+,.0f}", "%": "{:+.1f}%",
+            }).apply(_row_style, axis=1),
+            use_container_width=True, hide_index=True,
+        )
+
+        # ---- Daily revenue × CM trend ----
         daily = f.groupby("period", as_index=False).agg(
             net_revenue=("net_revenue", "sum"),
             CM1=("CM1", "sum"), CM2=("CM2", "sum"), CM3=("CM3", "sum"),
