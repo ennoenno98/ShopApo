@@ -1,0 +1,6 @@
+[theme]
+base = "light"
+primaryColor = "#0a8754"
+
+[server]
+runOnSave = true

@@ -1,0 +1,56 @@
+name: Shop Apotheke Weekly Export
+
+on:
+  schedule:
+    # Every Monday 05:30 UTC
+    - cron: "30 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      SHOP_APOTHEKE_API_KEY: ${{ secrets.SHOP_APOTHEKE_API_KEY }}
+      BING_DEVELOPER_TOKEN:  ${{ secrets.BING_DEVELOPER_TOKEN }}
+      BING_CLIENT_ID:        ${{ secrets.BING_CLIENT_ID }}
+      BING_CLIENT_SECRET:    ${{ secrets.BING_CLIENT_SECRET }}
+      BING_REFRESH_TOKEN:    ${{ secrets.BING_REFRESH_TOKEN }}
+      BING_CUSTOMER_ID:      ${{ secrets.BING_CUSTOMER_ID }}
+      BING_ACCOUNT_ID:       ${{ secrets.BING_ACCOUNT_ID }}
+      TIKTOK_ACCESS_TOKEN:   ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+      TIKTOK_ADVERTISER_ID:  ${{ secrets.TIKTOK_ADVERTISER_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-export.txt
+
+      - name: Run weekly export
+        run: python weekly_export.py --once
+
+      - name: Upload snapshot as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopapo-export-${{ github.run_id }}
+          path: exports/
+          retention-days: 90
+
+      - name: Commit snapshot to repo (for Streamlit Cloud)
+        run: |
+          if [[ -n "$(git status --porcelain exports/)" ]]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add exports/
+            git commit -m "data: weekly Shop Apotheke refresh"
+            git push
+          else
+            echo "No new data."
+          fi
