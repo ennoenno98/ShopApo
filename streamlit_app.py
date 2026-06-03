@@ -205,6 +205,7 @@ with tab_overview:
     if show_calculator_only:
         st.info("Snapshot not available — use the Margin calculator tab.")
     else:
+        # ---- Daily revenue × CM trend (top of overview) ----
         daily = f.groupby("period", as_index=False).agg(
             net_revenue=("net_revenue", "sum"),
             CM1=("CM1", "sum"), CM2=("CM2", "sum"), CM3=("CM3", "sum"),
@@ -216,10 +217,200 @@ with tab_overview:
         for cm, color in (("CM1", "#1f77b4"), ("CM2", "#ff7f0e"), ("CM3", "#d62728")):
             fig.add_scatter(x=daily["period"], y=daily[cm], name=cm,
                             mode="lines+markers", line=dict(color=color, width=2))
-        fig.update_layout(height=420, hovermode="x unified",
+        fig.update_layout(height=360, hovermode="x unified",
                           legend=dict(orientation="h", y=-0.15),
                           margin=dict(l=10, r=10, t=10, b=10))
         st.plotly_chart(fig, use_container_width=True)
+
+        # ---- Per-country breakdown ----
+        st.markdown("**Per-country breakdown** — Country CM3 % = total CM3 € / total Net Revenue € for that country.")
+        by_c = f.groupby("country", as_index=False).agg(
+            SKUs=("sku", "nunique"),
+            Units=("units", "sum"),
+            Sales=("net_revenue", "sum"),
+            CM3=("CM3", "sum"),
+            AdSpend=("ad_spend", "sum"),
+        )
+        by_c["CM3%"] = by_c["CM3"] / by_c["Sales"].replace(0, pd.NA) * 100
+        by_c = by_c.sort_values("Sales", ascending=False)
+
+        if not by_c.empty:
+            total = pd.DataFrame([{
+                "country": "Total",
+                "SKUs": by_c["SKUs"].sum(),
+                "Units": by_c["Units"].sum(),
+                "Sales": by_c["Sales"].sum(),
+                "CM3": by_c["CM3"].sum(),
+                "AdSpend": by_c["AdSpend"].sum(),
+                "CM3%": (by_c["CM3"].sum() / by_c["Sales"].sum() * 100)
+                         if by_c["Sales"].sum() else pd.NA,
+            }])
+            display = pd.concat([by_c, total], ignore_index=True)
+            st.dataframe(
+                display.style.format({
+                    "Sales": "€{:,.0f}", "CM3": "€{:,.0f}",
+                    "AdSpend": "€{:,.0f}", "CM3%": "{:.1f}%",
+                    "SKUs": "{:,.0f}", "Units": "{:,.0f}",
+                }, na_rep="—").apply(
+                    lambda row: ["font-weight:600; background:#F2F4F8"
+                                 if row["country"] == "Total" else ""] * len(row),
+                    axis=1,
+                ),
+                use_container_width=True, hide_index=True,
+            )
+            chart_df = by_c.copy()
+            country_fig = go.Figure()
+            country_fig.add_bar(x=chart_df["country"], y=chart_df["Sales"],
+                                name="Sales (€)", marker_color="#1f3864")
+            country_fig.add_bar(x=chart_df["country"], y=chart_df["CM3"],
+                                name="P&L Impact (€)", marker_color="#74AC2A")
+            country_fig.update_layout(barmode="group",
+                yaxis_title="€", height=300,
+                margin=dict(t=20, b=20, l=10, r=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            st.plotly_chart(country_fig, use_container_width=True)
+
+        # ---- Margin × Volume cluster matrix ----
+        st.markdown(
+            "**Margin × Volume clusters** — Tier 1 = top third, Tier 3 = bottom third. "
+            "*Click a cell to filter the table below.*"
+        )
+
+        by_sku = f.groupby("sku", as_index=False).agg(
+            product_title=("product_title", "first"),
+            units=("units", "sum"),
+            net_revenue=("net_revenue", "sum"),
+            CM1=("CM1", "sum"), CM2=("CM2", "sum"), CM3=("CM3", "sum"),
+            ad_spend=("ad_spend", "sum"),
+        )
+        by_sku["CM3%"] = by_sku["CM3"] / by_sku["net_revenue"].replace(0, pd.NA) * 100
+
+        def _tiers(s: pd.Series) -> pd.Series:
+            s = pd.to_numeric(s, errors="coerce")
+            if s.notna().sum() < 3:
+                return pd.Series(pd.NA, index=s.index, dtype="Int64")
+            ranks = s.rank(method="first", ascending=False)
+            try:
+                return pd.qcut(ranks, q=3, labels=[1, 2, 3]).astype("Int64")
+            except ValueError:
+                return pd.Series(pd.NA, index=s.index, dtype="Int64")
+
+        clean = by_sku.dropna(subset=["CM3%", "net_revenue"]).copy()
+        clean["Margin Tier"] = _tiers(clean["CM3%"])
+        clean["Volume Tier"] = _tiers(clean["net_revenue"])
+        clean["Cluster Code"] = (clean["Margin Tier"].astype("string") + "-"
+                                  + clean["Volume Tier"].astype("string"))
+        cluster_lookup = clean.set_index("sku")[["Margin Tier", "Volume Tier", "Cluster Code"]]
+        by_sku = by_sku.join(cluster_lookup, on="sku")
+
+        grid = (clean.groupby(["Margin Tier", "Volume Tier"], observed=True)
+                .size().unstack(fill_value=0)
+                .reindex(index=[1, 2, 3], columns=[1, 2, 3], fill_value=0))
+
+        if "active_cluster_code" not in st.session_state:
+            st.session_state["active_cluster_code"] = None
+
+        cluster_bg = {
+            "1-1": ("#C6EFCE", True),  "1-2": ("#E2F0D9", False), "1-3": ("#E2F0D9", False),
+            "2-1": ("#DEEBF7", False), "2-2": ("#FFFFFF", False), "2-3": ("#FFFFFF", False),
+            "3-1": ("#DEEBF7", False), "3-2": ("#FFFFFF", False), "3-3": ("#F8CBAD", False),
+        }
+        css_rules = []
+        for code, (bg, bold) in cluster_bg.items():
+            cls = f"st-key-cell_{code.replace('-', '_')}"
+            weight = "font-weight:600;" if bold else ""
+            css_rules.append(
+                f".{cls} button {{ background:{bg} !important; color:#111 !important; "
+                f"border:1px solid #d6d8dc !important; {weight} height:60px !important; "
+                f"font-size:0.95rem !important; }}"
+            )
+        active_code = st.session_state["active_cluster_code"]
+        if active_code:
+            cls = f"st-key-cell_{active_code.replace('-', '_')}"
+            css_rules.append(
+                f".{cls} button {{ outline:3px solid #1f3864 !important; outline-offset:-3px; }}"
+            )
+        st.markdown(f"<style>{''.join(css_rules)}</style>", unsafe_allow_html=True)
+
+        sales_lbl = {1: "High sales", 2: "Mid sales", 3: "Low sales"}
+        margin_lbl = {1: "High margin", 2: "Mid margin", 3: "Low margin"}
+        header = st.columns([1.4, 2, 2, 2], gap="small")
+        header[0].markdown("&nbsp;", unsafe_allow_html=True)
+        for i, v in enumerate([1, 2, 3]):
+            header[i + 1].markdown(
+                f"<div style='text-align:center; font-weight:600; padding:6px 0;'>{sales_lbl[v]}</div>",
+                unsafe_allow_html=True,
+            )
+        for m in [1, 2, 3]:
+            row = st.columns([1.4, 2, 2, 2], gap="small")
+            row[0].markdown(
+                f"<div style='font-weight:600; padding:20px 0;'>{margin_lbl[m]}</div>",
+                unsafe_allow_html=True,
+            )
+            for i, v in enumerate([1, 2, 3]):
+                code = f"{m}-{v}"
+                count = int(grid.loc[m, v])
+                badge = " ⭐" if code == "1-1" else (" ⚠️" if code == "3-3" else "")
+                with row[i + 1].container(key=f"cell_{m}_{v}"):
+                    if st.button(f"{count} SKUs{badge}", key=f"btn_{m}_{v}",
+                                 use_container_width=True):
+                        st.session_state["active_cluster_code"] = (
+                            None if active_code == code else code
+                        )
+                        st.rerun()
+
+        if active_code:
+            st.caption(f"Filtered to cluster **{active_code}** · "
+                       f"click the same cell again to clear.")
+
+        # ---- Master SKU table with deltas vs prior window ----
+        # Δ CM3% vs equivalent prior window (same length, immediately before).
+        prev_by_sku = prev.groupby("sku", as_index=False).agg(
+            prev_net_revenue=("net_revenue", "sum"),
+            prev_CM3=("CM3", "sum"),
+        ) if not prev.empty else pd.DataFrame(
+            columns=["sku", "prev_net_revenue", "prev_CM3"]
+        )
+        prev_by_sku["prev_CM3%"] = (
+            prev_by_sku["prev_CM3"] / prev_by_sku["prev_net_revenue"].replace(0, pd.NA) * 100
+        )
+        by_sku = by_sku.merge(
+            prev_by_sku[["sku", "prev_CM3%", "prev_net_revenue"]],
+            on="sku", how="left",
+        )
+        by_sku["Δ CM3%"] = by_sku["CM3%"] - by_sku["prev_CM3%"]
+        by_sku["Rev Δ %"] = (
+            (by_sku["net_revenue"] - by_sku["prev_net_revenue"])
+            / by_sku["prev_net_revenue"].replace(0, pd.NA) * 100
+        )
+
+        view = by_sku.copy()
+        if active_code:
+            view = view[view["Cluster Code"] == active_code]
+        view = view.sort_values("net_revenue", ascending=False)
+
+        cols = ["sku", "product_title", "Cluster Code", "units", "net_revenue",
+                "CM2", "CM3", "CM3%", "Δ CM3%", "Rev Δ %", "ad_spend"]
+        st.dataframe(
+            view[cols].style.format({
+                "units": "{:,.0f}",
+                "net_revenue": "€{:,.0f}", "CM2": "€{:,.0f}", "CM3": "€{:,.0f}",
+                "CM3%": "{:.1f}%", "Δ CM3%": "{:+.1f} pp", "Rev Δ %": "{:+.1f}%",
+                "ad_spend": "€{:,.0f}",
+            }, na_rep="—").apply(
+                lambda row: [
+                    f"background:{cluster_bg.get(row['Cluster Code'], ('#fff', False))[0]}"
+                    if c == "Cluster Code" else ""
+                    for c in cols
+                ],
+                axis=1,
+            ),
+            use_container_width=True, hide_index=True, height=520,
+        )
+        st.caption(
+            f"{len(view)} SKUs · Δ CM3% in percentage points vs the previous "
+            f"{span_days}-day window ({prev_start.date()} → {prev_end.date()})."
+        )
 
 # ---- Weekly trend ----
 with tab_weekly:
