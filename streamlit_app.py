@@ -195,8 +195,9 @@ if not show_calculator_only:
 
 
 # ============================ TABS ============================
-tab_overview, tab_weekly, tab_skus, tab_countries, tab_ads, tab_calc = st.tabs(
-    ["Overview", "Weekly trend", "SKU detail", "Country", "Ad spend", "Margin calculator"]
+tab_overview, tab_weekly, tab_skus, tab_topbot, tab_countries, tab_ads, tab_calc = st.tabs(
+    ["Overview", "Weekly trend", "SKU detail", "Top / Bottom SKUs",
+     "Country", "Ad spend", "Margin calculator"]
 )
 
 # ---- Overview ----
@@ -282,6 +283,93 @@ with tab_skus:
                 "CM3%": "{:.1f}%",
             }),
             use_container_width=True, hide_index=True, height=520,
+        )
+
+# ---- Top / Bottom SKUs ----
+with tab_topbot:
+    if show_calculator_only:
+        st.info("Snapshot not available.")
+    else:
+        c1, c2, c3, c4 = st.columns([1.4, 1, 1, 1])
+        with c1:
+            metric = st.selectbox(
+                "Rank by",
+                ["CM3", "CM3%", "CM2", "CM2%", "CM1", "CM1%",
+                 "net_revenue", "units", "ad_spend", "ROAS"],
+                index=0,
+            )
+        with c2:
+            top_n = st.number_input("Top N", min_value=3, max_value=50, value=10, step=1)
+        with c3:
+            min_units = st.number_input("Min units (noise filter)", min_value=0,
+                                        value=5, step=1,
+                                        help="Drop SKUs below this threshold "
+                                             "to avoid one-off orders skewing %s.")
+        with c4:
+            exclude_zero_rev = st.checkbox("Exclude €0 revenue", value=True)
+
+        # Aggregate the already-filtered window to one row per SKU.
+        sku_agg = f.groupby("sku", as_index=False).agg(
+            product_title=("product_title", "first"),
+            units=("units", "sum"),
+            orders=("orders", "sum"),
+            net_revenue=("net_revenue", "sum"),
+            ad_spend=("ad_spend", "sum"),
+            CM1=("CM1", "sum"), CM2=("CM2", "sum"), CM3=("CM3", "sum"),
+        )
+        rev_safe = sku_agg["net_revenue"].replace(0, pd.NA)
+        sku_agg["CM1%"] = sku_agg["CM1"] / rev_safe * 100
+        sku_agg["CM2%"] = sku_agg["CM2"] / rev_safe * 100
+        sku_agg["CM3%"] = sku_agg["CM3"] / rev_safe * 100
+        sku_agg["ROAS"] = sku_agg["net_revenue"] / sku_agg["ad_spend"].replace(0, pd.NA)
+
+        flt = sku_agg[sku_agg["units"] >= min_units]
+        if exclude_zero_rev:
+            flt = flt[flt["net_revenue"] > 0]
+
+        ranked = flt.dropna(subset=[metric]).sort_values(metric, ascending=False)
+        top = ranked.head(top_n)
+        bot = ranked.tail(top_n).iloc[::-1]
+
+        fmt = {
+            "units": "{:,.0f}", "orders": "{:,.0f}",
+            "net_revenue": "€{:,.0f}", "ad_spend": "€{:,.0f}",
+            "CM1": "€{:,.0f}", "CM2": "€{:,.0f}", "CM3": "€{:,.0f}",
+            "CM1%": "{:.1f}%", "CM2%": "{:.1f}%", "CM3%": "{:.1f}%",
+            "ROAS": "{:.2f}×",
+        }
+        cols = ["sku", "product_title", "units", "net_revenue", "CM1",
+                "CM2", "CM3", "CM3%", "ad_spend", "ROAS"]
+
+        c_top, c_bot = st.columns(2)
+        with c_top:
+            st.markdown(f"**Top {top_n} by `{metric}`**")
+            st.dataframe(top[cols].style.format(fmt),
+                         use_container_width=True, hide_index=True, height=420)
+        with c_bot:
+            st.markdown(f"**Bottom {top_n} by `{metric}`**")
+            st.dataframe(bot[cols].style.format(fmt),
+                         use_container_width=True, hide_index=True, height=420)
+
+        # Quick visual on the chosen metric for both ends.
+        chart_df = pd.concat([
+            top.assign(side="Top"),
+            bot.assign(side="Bottom"),
+        ])
+        if not chart_df.empty:
+            fig = px.bar(
+                chart_df, x="sku", y=metric, color="side",
+                color_discrete_map={"Top": "#0a8754", "Bottom": "#d62728"},
+                hover_data={"product_title": True, "units": True, "net_revenue": ":,.0f"},
+            )
+            fig.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10),
+                              xaxis_title="", legend_title="",
+                              legend=dict(orientation="h", y=-0.25))
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.caption(
+            f"{len(flt)} SKUs after filters · "
+            f"period {pd.Timestamp(start).date()} → {pd.Timestamp(end).date()}"
         )
 
 # ---- Country ----
