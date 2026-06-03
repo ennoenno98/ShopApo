@@ -77,10 +77,10 @@ Set in **GitHub → Settings → Secrets and variables → Actions** *and* in
 # Streamlit dashboard
 DASHBOARD_PASSWORD       = "..."
 
-# Shop Apotheke (Mirakl)
+# Shop Apotheke (Mirakl) — base URL defaults to https://shopapotheke.mirakl.net/api
 SHOP_APOTHEKE_API_KEY    = "..."
-# Optional override if the marketplace endpoint moves:
-# SHOP_APOTHEKE_BASE_URL = "https://shop-apotheke.mirakl.net/api"
+# Optional override if the host changes:
+# SHOP_APOTHEKE_BASE_URL = "https://shopapotheke.mirakl.net/api"
 
 # Microsoft (Bing) Ads
 BING_DEVELOPER_TOKEN     = "..."

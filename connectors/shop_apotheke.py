@@ -4,7 +4,7 @@ Shop Apotheke runs its seller marketplace on Mirakl. Sellers authenticate
 with a static API key issued in the seller portal:
     Settings → User → API key  →  send as `Authorization: <key>` header.
 
-API base:    https://marketplace.shop-apotheke.com/api
+API base:    https://shopapotheke.mirakl.net/api
 Docs (general Mirakl):  https://help.mirakl.net/api/
 
 The endpoint we use is OR11 (`GET /orders`), which returns shipped + paid
@@ -31,7 +31,7 @@ from . import ConnectorSkipped
 
 log = logging.getLogger(__name__)
 
-DEFAULT_BASE = "https://marketplace.shop-apotheke.com/api"
+DEFAULT_BASE = "https://shopapotheke.mirakl.net/api"
 PAGE_SIZE = 100
 
 
