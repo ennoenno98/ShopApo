@@ -61,6 +61,13 @@ def _iter_orders(session: requests.Session, base: str, start: datetime, end: dat
             ]),
         }
         r = session.get(f"{base}/orders", params=params, timeout=120)
+        if not r.ok:
+            # Mirakl returns a JSON body on auth/permission errors that
+            # explains *why* (invalid key vs. unauthorized endpoint vs.
+            # expired). Surface it before raising so the workflow log
+            # tells us what's wrong, not just the status code.
+            log.error("Mirakl %s %s — body: %s",
+                      r.status_code, r.reason, r.text[:500])
         r.raise_for_status()
         payload = r.json()
         orders = payload.get("orders", [])
