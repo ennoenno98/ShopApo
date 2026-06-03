@@ -104,16 +104,64 @@ def _required_env(name: str) -> str:
     return v
 
 
+def _dump_inputs(page) -> None:
+    """Log every <input>/<button> on the page so we can fix selectors after a miss."""
+    try:
+        info = page.evaluate(
+            """() => {
+              const fields = Array.from(document.querySelectorAll('input,button,a')).map(el => ({
+                tag: el.tagName,
+                type: el.getAttribute('type'),
+                name: el.getAttribute('name'),
+                id: el.id,
+                placeholder: el.getAttribute('placeholder'),
+                ariaLabel: el.getAttribute('aria-label'),
+                text: (el.innerText || '').slice(0, 60),
+              }));
+              return fields;
+            }"""
+        )
+        log.info("--- Input / button / link elements on this page ---")
+        for f in info:
+            log.info("  %s", f)
+        log.info("--- End element dump ---")
+    except Exception as e:
+        log.warning("Could not dump page inputs: %s", e)
+
+
+def _dump_html(page, name: str) -> None:
+    """Save raw HTML alongside the screenshot so we can grep selectors later."""
+    SCREEN_DIR.mkdir(parents=True, exist_ok=True)
+    target = SCREEN_DIR / f"{datetime.utcnow():%H%M%S}_{name}.html"
+    try:
+        target.write_text(page.content(), encoding="utf-8")
+        log.info("  · html → %s", target)
+    except Exception as e:
+        log.warning("  · html dump failed: %s", e)
+
+
 def login(page, *, debug: bool) -> None:
     email = _required_env("SA_TECH_EMAIL")
     password = _required_env("SA_TECH_PASSWORD")
 
     log.info("Loading login page %s", LOGIN_URL)
     page.goto(LOGIN_URL, wait_until="domcontentloaded")
+    # SPA login pages often hydrate after DOMContentLoaded.
+    page.wait_for_load_state("networkidle", timeout=20_000)
     if debug:
         _shoot(page, "01_login_loaded")
+        _dump_html(page, "01_login_loaded")
 
-    page.wait_for_selector(SELECTOR_EMAIL, timeout=15_000)
+    try:
+        page.wait_for_selector(SELECTOR_EMAIL, timeout=15_000)
+    except PWTimeout:
+        log.error("Email selector %r did not match anything on the login page.",
+                  SELECTOR_EMAIL)
+        _shoot(page, "02_login_no_email_field")
+        _dump_html(page, "02_login_no_email_field")
+        _dump_inputs(page)
+        raise
+
     page.fill(SELECTOR_EMAIL, email)
     page.fill(SELECTOR_PASSWORD, password)
     if debug:

@@ -42,17 +42,28 @@ jobs:
       - name: Download Shop Apotheke on-site ads (sa-tech.de)
         if: ${{ env.SA_TECH_EMAIL != '' }}
         continue-on-error: true
-        run: python scripts/sa_tech_download.py --days 14
+        run: python scripts/sa_tech_download.py --days 14 --debug
+
+      - name: Upload sa-tech debug screenshots
+        if: always() && env.SA_TECH_EMAIL != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sa-tech-screens-${{ github.run_id }}
+          path: scripts/.sa_tech_screens/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Run weekly export
         run: python weekly_export.py --once
 
       - name: Upload snapshot as artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: shopapo-export-${{ github.run_id }}
           path: exports/
           retention-days: 90
+          if-no-files-found: ignore
 
       - name: Commit snapshot to repo (for Streamlit Cloud)
         run: |
