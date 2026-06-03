@@ -72,6 +72,29 @@ def _client():
     return s, base
 
 
+def _get_with_retry(session: requests.Session, url: str, params: dict,
+                    max_attempts: int = 5) -> requests.Response:
+    """GET that retries on 429 (Mirakl rate limit) and 5xx with backoff.
+
+    Respects the `Retry-After` header when present; otherwise uses
+    exponential backoff (5s, 10s, 20s, 40s).
+    """
+    import time
+    delay = 5
+    for attempt in range(1, max_attempts + 1):
+        r = session.get(url, params=params, timeout=120)
+        if r.status_code != 429 and r.status_code < 500:
+            return r
+        if attempt == max_attempts:
+            return r  # let the caller raise_for_status
+        wait = int(r.headers.get("Retry-After") or delay)
+        log.warning("Mirakl %s (attempt %d/%d) — sleeping %ds",
+                    r.status_code, attempt, max_attempts, wait)
+        time.sleep(wait)
+        delay = min(delay * 2, 60)
+    return r
+
+
 def _iter_orders(session: requests.Session, base: str, start: datetime, end: datetime) -> Iterator[dict]:
     """Stream orders from Mirakl OR11, paginating until exhausted."""
     offset = 0
@@ -87,7 +110,7 @@ def _iter_orders(session: requests.Session, base: str, start: datetime, end: dat
                 "CLOSED", "REFUSED", "REFUNDED",
             ]),
         }
-        r = session.get(f"{base}/orders", params=params, timeout=120)
+        r = _get_with_retry(session, f"{base}/orders", params)
         if not r.ok:
             # Mirakl returns a JSON body on auth/permission errors that
             # explains *why* (invalid key vs. unauthorized endpoint vs.
