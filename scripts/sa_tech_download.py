@@ -60,7 +60,9 @@ except ImportError:
 
 # ---------- adjust these if the login / reports page changes ----------
 BASE_URL = os.environ.get("SA_TECH_BASE_URL", "https://retail.sa-tech.de").rstrip("/")
-LOGIN_URL = f"{BASE_URL}/login"
+# Start at the root so any redirect (e.g. to /auth/signin) is followed
+# automatically; /login is also handled if no redirect happens.
+LOGIN_URL = BASE_URL
 REPORTS_URL = f"{BASE_URL}/advertiser-reports/"
 
 # Login form selectors — match the most common patterns first.
@@ -257,8 +259,31 @@ def download_csv(page, *, debug: bool) -> Path:
 
 def run(start: datetime, end: datetime, *, headed: bool, debug: bool) -> Path:
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not headed)
-        context = browser.new_context(accept_downloads=True)
+        # Anti-bot-detection: drop the most obvious Playwright/headless
+        # fingerprints, run with a real Chrome (not chrome-headless-shell),
+        # set a normal UA + DE locale + viewport so the SPA boots.
+        browser = p.chromium.launch(
+            headless=not headed,
+            channel="chrome" if not headed else None,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+            ],
+        )
+        context = browser.new_context(
+            accept_downloads=True,
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1440, "height": 900},
+            locale="de-DE",
+            timezone_id="Europe/Berlin",
+        )
+        # Strip `navigator.webdriver` so the page can't see we're automated.
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', { get: () => undefined });"
+        )
         page = context.new_page()
         try:
             login(page, debug=debug)
