@@ -79,7 +79,7 @@ def aggregate(line_margins: pd.DataFrame) -> pd.DataFrame:
             commission=("commission", "sum"),
             dhl_cost=("dhl_cost", "sum"),
             shipping_cost_net=("shipping_cost_net", "sum"),
-            overhead=("overhead", "sum"),
+            three_pl_cost=("three_pl_cost", "sum"),
             CM1=("CM1", "sum"),
             CM2=("CM2", "sum"),
         )

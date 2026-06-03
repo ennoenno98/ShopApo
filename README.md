@@ -25,20 +25,27 @@ CM1               = net_revenue − product_cost                          (gross
 shipping_cost     = DHL_rate[country, peak?] × qty                      (€ gross we pay)
 shipping_cost_net = shipping_cost / (1 + vat[country])
 commission        = 0.16 × gross_revenue                                (Shop Apotheke fee)
-overhead          = 0.10 × (net_revenue + shipping_cost_net)            (logistics)
+three_pl_cost     = per-order fixed (€2.21, shared across lines by qty)
+                    + pick cost per line (€0.23 first + €0.19 × extra units)
 
-CM2               = CM1 − shipping_cost_net − commission − overhead
+CM2               = CM1 − shipping_cost_net − commission − three_pl_cost
 CM3               = CM2 − allocated_ad_spend
 ```
 
-Notable specifics (all from the workbook):
+Notable specifics (all from the workbooks):
 - **VAT** uses the pharma-reduced rate: DE 7%, FR 5.5%, IT/ES 10%, etc.
 - **DHL peak surcharge** (+0.19 €) applies in November and December.
+- **3PL fulfillment** uses the Everstock rate card from the AP26 plan
+  (`Logistics 3PL`, rows 41–52). Per-order fixed €2.21 (handling 0.12
+  + consolidation 0.55 + pack/ship 1.15 + packaging 0.27 + filling 0.12),
+  plus per-pick variable (0.23 first SKU pick + 0.19 each additional
+  unit of the same SKU). Editable in `inputs/three_pl_rates.csv`.
 - **Shipping revenue** the customer pays goes to Shop Apotheke, not the
   seller, so it is *not* added back into CM2.
 - **GB COGS × 0.83** — the workbook treats GB COGS in GBP via a fixed FX.
 
-All knobs live as constants in `margin_model.py` if you need to tune them.
+Knobs live as constants in `margin_model.py` (commission rate, peak
+months, GB FX) or in `inputs/*.csv` (VAT, DHL, 3PL rates, COGS).
 
 ## Layout
 
@@ -53,6 +60,7 @@ All knobs live as constants in `margin_model.py` if you need to tune them.
 | `streamlit_app.py`               | Password-gated dashboard. Tabs: Overview, Weekly trend, SKU detail, Country, Ad spend, **Margin calculator** (interactive mirror of `Margen Calc pharma`). |
 | `inputs/cogs.csv`                | Per-SKU unit COGS (seeded from `cogs jtl`). |
 | `inputs/dhl_shipping.csv`        | DHL rate card per country, standard + peak. |
+| `inputs/three_pl_rates.csv`      | Everstock 3PL rate card (per-order fixed + per-pick). |
 | `inputs/vat_rates.csv`           | Country → pharma-reduced VAT rate. |
 | `inputs/shop_apotheke_shipping_revenue.csv` | What customers pay for shipping (reference; not used in CM2). |
 | `inputs/campaign_sku_map.csv`    | (Optional) campaign → SKU for direct ad attribution. |

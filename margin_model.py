@@ -1,8 +1,9 @@
 """ePharma (Shop Apotheke) margin model.
 
-Mirrors the `Margen Calc pharma` sheet from Margin_Check_V5.xlsx so the
-weekly dashboard and the interactive calculator both compute the same
-numbers.
+Mirrors the `Margen Calc pharma` sheet from Margin_Check_V5.xlsx, with
+the 10% logistics overhead replaced by the 3PL rate card from the
+AP26 plan (`Logistics 3PL`, rows 41–52). Rates live in
+`inputs/three_pl_rates.csv` so they can be tuned without code changes.
 
 Per-line economics
 ------------------
@@ -15,9 +16,10 @@ Per-line economics
   shipping_cost    = dhl_cost(country, peak?) × qty              (€ gross, charged to us)
   shipping_cost_net = shipping_cost / (1 + vat[country])
   commission       = COMMISSION_RATE × gross_revenue             (default 16%)
-  overhead         = (net_revenue + shipping_cost_net) × OVERHEAD_RATE   (10%)
+  three_pl_cost    = per-order fixed (€2.21, spread across lines by qty)
+                     + pick cost per line (0.23 first + 0.19 × extra units)
 
-  CM2              = CM1 − shipping_cost_net − commission − overhead
+  CM2              = CM1 − shipping_cost_net − commission − three_pl_cost
   CM3              = CM2 − allocated_ad_spend
 
 Shipping revenue paid by the customer accrues to Shop Apotheke, not the
@@ -30,9 +32,8 @@ from pathlib import Path
 
 import pandas as pd
 
-# Defaults match the workbook (`Margen Calc pharma`).
+# Defaults match the workbook (`Margen Calc pharma` + `Logistics 3PL`).
 COMMISSION_RATE = 0.16      # ePharma marketplace commission, 16% of gross
-OVERHEAD_RATE = 0.10        # Logistics overhead, 10% of (net sales + net shipping cost)
 GB_COGS_FX = 0.83           # EUR→GBP adjustment applied to COGS when country == GB
 PEAK_MONTHS = {11, 12}      # November + December → DHL peak surcharge
 
@@ -65,8 +66,33 @@ def load_shipping_revenue() -> dict[str, float]:
     return dict(zip(df["country"], df["shipping_revenue_gross"].astype(float)))
 
 
+def load_3pl_rates() -> dict[str, float]:
+    """Per-order and per-pick 3PL rates from `inputs/three_pl_rates.csv`."""
+    df = pd.read_csv(INPUTS_DIR / "three_pl_rates.csv")
+    return dict(zip(df["component"], df["rate_eur"].astype(float)))
+
+
 def is_peak(day: pd.Timestamp | date) -> bool:
     return pd.Timestamp(day).month in PEAK_MONTHS
+
+
+def _three_pl_per_line(qty: pd.Series, order_qty: pd.Series, rates: dict[str, float]) -> pd.Series:
+    """Per-order-line 3PL cost.
+
+    Per-order fixed costs (handling, consolidation, pack/ship, packaging,
+    filling) are charged once per order and split across that order's
+    lines in proportion to their units. Pick costs are line-level:
+    one "first pick" per (order, sku) plus N-1 "additional picks" for
+    further units of the same SKU.
+    """
+    per_order_fixed = (
+        rates["handling"] + rates["consolidation"] + rates["pack_shipout"]
+        + rates["packaging"] + rates["filling"]
+    )
+    line_share = qty / order_qty.replace(0, pd.NA)
+    line_fixed = per_order_fixed * line_share.fillna(0)
+    line_picks = rates["pick_first"] + rates["pick_additional"] * (qty - 1).clip(lower=0)
+    return line_fixed + line_picks
 
 
 def compute_line_margins(
@@ -76,7 +102,7 @@ def compute_line_margins(
     dhl: pd.DataFrame,
     *,
     commission_rate: float = COMMISSION_RATE,
-    overhead_rate: float = OVERHEAD_RATE,
+    three_pl_rates: dict[str, float] | None = None,
 ) -> pd.DataFrame:
     """Add per-order-line economics columns to `orders`.
 
@@ -86,9 +112,12 @@ def compute_line_margins(
       cogs columns:   sku, unit_cogs
 
     Returns the input frame with extra columns: vat_rate, net_revenue,
-    product_cost, dhl_cost, shipping_cost_net, commission, overhead,
+    product_cost, dhl_cost, shipping_cost_net, commission, three_pl_cost,
     CM1, CM2.
     """
+    if three_pl_rates is None:
+        three_pl_rates = load_3pl_rates()
+
     df = orders.merge(cogs[["sku", "unit_cogs"]], on="sku", how="left")
     df["unit_cogs"] = df["unit_cogs"].fillna(0)
 
@@ -115,9 +144,11 @@ def compute_line_margins(
     df["dhl_cost"] = df["dhl_unit"] * df["qty"]
     df["shipping_cost_net"] = df["dhl_cost"] / (1 + df["vat_rate"])
     df["commission"] = commission_rate * df["gross_revenue"]
-    df["overhead"] = overhead_rate * (df["net_revenue"] + df["shipping_cost_net"])
 
-    df["CM2"] = df["CM1"] - df["shipping_cost_net"] - df["commission"] - df["overhead"]
+    order_qty = df.groupby("order_id")["qty"].transform("sum")
+    df["three_pl_cost"] = _three_pl_per_line(df["qty"], order_qty, three_pl_rates)
+
+    df["CM2"] = df["CM1"] - df["shipping_cost_net"] - df["commission"] - df["three_pl_cost"]
     return df
 
 
@@ -132,12 +163,16 @@ def quote(
     target_price: float | None = None,
     peak: bool = False,
     commission_rate: float = COMMISSION_RATE,
-    overhead_rate: float = OVERHEAD_RATE,
     roas: float | None = None,
 ) -> dict[str, float]:
-    """Mirror of the Excel calculator: returns CM1/CM2/CM3 + %s for one SKU."""
+    """Mirror of the Excel calculator: returns CM1/CM2/CM3 + %s for one SKU.
+
+    Assumes a single-line order (one SKU): the full per-order fixed 3PL
+    cost lands on this line.
+    """
     vat = load_vat().get(country, 0.07)
     dhl = load_dhl().set_index("country")
+    rates = load_3pl_rates()
 
     if country == "GB":
         unit_cogs = unit_cogs * GB_COGS_FX
@@ -154,9 +189,14 @@ def quote(
     dhl_cost = dhl_unit * qty
     ship_net = dhl_cost / (1 + vat)
     commission = commission_rate * gross_price * qty
-    overhead = overhead_rate * (sales_net + ship_net)
 
-    cm2 = cm1 - ship_net - commission - overhead
+    per_order_fixed = (rates["handling"] + rates["consolidation"]
+                       + rates["pack_shipout"] + rates["packaging"]
+                       + rates["filling"])
+    pick = rates["pick_first"] + rates["pick_additional"] * max(0, qty - 1)
+    three_pl_cost = per_order_fixed + pick
+
+    cm2 = cm1 - ship_net - commission - three_pl_cost
 
     ad_spend = (sales_net / roas) if roas else 0.0
     cm3 = cm2 - ad_spend
@@ -171,7 +211,7 @@ def quote(
         "dhl_cost": dhl_cost,
         "shipping_cost_net": ship_net,
         "commission": commission,
-        "overhead": overhead,
+        "three_pl_cost": three_pl_cost,
         "CM2": cm2, "CM2%": cm2 / current_net * 100 if current_net else 0,
         "ad_spend": ad_spend,
         "CM3": cm3, "CM3%": cm3 / current_net * 100 if current_net else 0,

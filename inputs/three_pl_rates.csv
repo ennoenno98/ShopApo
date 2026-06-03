@@ -1,0 +1,8 @@
+component,unit,rate_eur,note
+handling,per_order,0.12,Abwicklung — fixed per order
+consolidation,per_order,0.55,Orderkonsolidierung — fixed per order
+pack_shipout,per_order,1.15,Pack & Shipout — fixed per order
+packaging,per_order,0.27,1× Karton 35x25x8cm
+filling,per_order,0.12,~1m Füllmaterial
+pick_first,per_sku_line,0.23,Erster Pick pro SKU
+pick_additional,per_unit_after_first,0.19,Jeder zusätzliche Pick gleicher SKU

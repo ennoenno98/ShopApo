@@ -6,7 +6,8 @@ and renders a password-gated multi-tab dashboard.
 Margin model in `margin_model.py` mirrors the `Margen Calc pharma` sheet
 from Margin_Check_V5.xlsx: 16% commission on gross, country-specific
 VAT (pharma-reduced rates), DHL rate-card shipping cost with Nov+Dec
-peak surcharge, 10% logistics overhead, GB COGS × 0.83.
+peak surcharge, 3PL rate card (per-order fixed + per-pick variable),
+GB COGS × 0.83.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import streamlit as st
 
 from margin_model import (
     COMMISSION_RATE,
-    OVERHEAD_RATE,
+    load_3pl_rates,
     PEAK_MONTHS,
     load_cogs,
     load_dhl,
@@ -88,7 +89,7 @@ def load(path: Path) -> pd.DataFrame:
     df["period"] = pd.to_datetime(df["period"], errors="coerce").dt.normalize()
     for c in ("orders", "units", "gross_revenue", "refunded", "net_revenue",
               "commission", "shipping_cost_net", "product_cost",
-              "dhl_cost", "overhead", "CM1", "CM2", "CM3", "ad_spend"):
+              "dhl_cost", "three_pl_cost", "CM1", "CM2", "CM3", "ad_spend"):
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
@@ -207,7 +208,7 @@ with tab_overview:
     else:
         # ---- Estimated P&L until CM3 (€ + % of net revenue) ----
         agg = f[["gross_revenue", "refunded", "net_revenue", "product_cost",
-                 "commission", "shipping_cost_net", "overhead",
+                 "commission", "shipping_cost_net", "three_pl_cost",
                  "CM1", "CM2", "ad_spend", "CM3"]].sum(numeric_only=True)
         nr = agg["net_revenue"] or 1  # avoid div-by-zero; absolutes still meaningful
         pnl = pd.DataFrame([
@@ -218,7 +219,7 @@ with tab_overview:
             ("CM1",                  agg["CM1"],               "="),
             ("− Marketplace commission (16%)", -agg["commission"], ""),
             ("− Outbound shipping (net)",      -agg["shipping_cost_net"], ""),
-            ("− Logistics overhead (10%)",     -agg["overhead"], ""),
+            ("− 3PL fulfillment (Everstock)",  -agg["three_pl_cost"], ""),
             ("CM2",                  agg["CM2"],               "="),
             ("− Ad spend",          -agg["ad_spend"],           ""),
             ("CM3",                  agg["CM3"],               "="),
@@ -492,7 +493,7 @@ with tab_skus:
             product_cost=("product_cost", "sum"),
             commission=("commission", "sum"),
             shipping_cost_net=("shipping_cost_net", "sum"),
-            overhead=("overhead", "sum"),
+            three_pl_cost=("three_pl_cost", "sum"),
             ad_spend=("ad_spend", "sum"),
             CM1=("CM1", "sum"), CM2=("CM2", "sum"), CM3=("CM3", "sum"),
         )
@@ -504,7 +505,7 @@ with tab_skus:
                 "units": "{:,.0f}",
                 "net_revenue": "€{:,.0f}", "product_cost": "€{:,.0f}",
                 "commission": "€{:,.0f}", "shipping_cost_net": "€{:,.0f}",
-                "overhead": "€{:,.0f}", "ad_spend": "€{:,.0f}",
+                "three_pl_cost": "€{:,.0f}", "ad_spend": "€{:,.0f}",
                 "CM1": "€{:,.0f}", "CM2": "€{:,.0f}", "CM3": "€{:,.0f}",
                 "CM3%": "{:.1f}%",
             }),
@@ -731,8 +732,8 @@ with tab_calc:
                                 -q["shipping_cost_net"]),
         (f"− Commission ({COMMISSION_RATE:.0%} gross)",
                                 -q["commission"]),
-        (f"− Logistics overhead ({OVERHEAD_RATE:.0%})",
-                                -q["overhead"]),
+        ("− 3PL fulfillment (Everstock)",
+                                -q["three_pl_cost"]),
         ("= CM2",               q["CM2"]),
         ("− Ad spend (1/ROAS)", -q["ad_spend"]),
         ("= CM3",               q["CM3"]),
@@ -746,7 +747,7 @@ with tab_calc:
         st.write(f"""
         - **VAT (pharma-reduced rate):** {q['vat_rate']:.1%} for {country}
         - **Commission:** {COMMISSION_RATE:.0%} of gross (Shop Apotheke marketplace fee)
-        - **Logistics overhead:** {OVERHEAD_RATE:.0%} of (net sales + net shipping cost)
+        - **3PL fulfillment:** Everstock rate card (`inputs/three_pl_rates.csv`). For a single-SKU order of qty × N: per-order fixed €2.21 + picks (€0.23 + €0.19 × (N−1)).
         - **Shipping cost:** DHL rate card by country, +0.19 € peak surcharge in Nov+Dec
         - **GB COGS adjustment:** × 0.83 (EUR→GBP)
         - **Shipping revenue** charged to the customer accrues to Shop Apotheke, not the seller, so it is not added back into CM2.
