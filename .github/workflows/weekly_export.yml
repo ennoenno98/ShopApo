@@ -22,6 +22,8 @@ jobs:
       BING_ACCOUNT_ID:       ${{ secrets.BING_ACCOUNT_ID }}
       TIKTOK_ACCESS_TOKEN:   ${{ secrets.TIKTOK_ACCESS_TOKEN }}
       TIKTOK_ADVERTISER_ID:  ${{ secrets.TIKTOK_ADVERTISER_ID }}
+      SA_TECH_EMAIL:         ${{ secrets.SA_TECH_EMAIL }}
+      SA_TECH_PASSWORD:      ${{ secrets.SA_TECH_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +34,15 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements-export.txt
+
+      - name: Install Playwright browser
+        if: ${{ env.SA_TECH_EMAIL != '' }}
+        run: python -m playwright install --with-deps chromium
+
+      - name: Download Shop Apotheke on-site ads (sa-tech.de)
+        if: ${{ env.SA_TECH_EMAIL != '' }}
+        continue-on-error: true
+        run: python scripts/sa_tech_download.py --days 14
 
       - name: Run weekly export
         run: python weekly_export.py --once

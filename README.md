@@ -93,6 +93,10 @@ BING_ACCOUNT_ID          = "..."
 # TikTok Ads
 TIKTOK_ACCESS_TOKEN      = "..."
 TIKTOK_ADVERTISER_ID     = "..."
+
+# Shop Apotheke retail-media portal (sa-tech.de) — auto-download
+SA_TECH_EMAIL            = "..."
+SA_TECH_PASSWORD         = "..."
 ```
 
 Missing credentials for any one connector skip that source — the snapshot
@@ -100,16 +104,22 @@ is still written from whatever did succeed.
 
 ## Shop Apotheke on-site ads
 
-There's no public API for the Shop Apotheke sponsored-products platform.
-Each week:
+The retail-media portal at <https://retail.sa-tech.de/advertiser-reports/>
+has no public API. We automate the CSV export via Playwright:
 
-1. In the ads UI: **Reports → Performance → Export → CSV**.
-2. Drop the file into `inputs/shop_apotheke_ads/` and commit. Required
-   columns: `date, campaign, spend`. Optional: `impressions, clicks,
-   conversions, revenue`.
-
-When/if an API ships, swap the body of `connectors/shop_apotheke_ads.py`
-— the orchestrator's contract (return columns) stays the same.
+- `scripts/sa_tech_download.py` logs into the portal with
+  `SA_TECH_EMAIL` / `SA_TECH_PASSWORD`, sets the date range, and
+  downloads the CSV into `inputs/shop_apotheke_ads/`.
+- The weekly GitHub Action runs it before `weekly_export.py`, so the
+  ad data is fresh each Monday. If those two secrets aren't set the
+  step is skipped.
+- First-run debugging: `python scripts/sa_tech_download.py --headed
+  --debug` — opens a visible browser and saves a screenshot of every
+  step to `scripts/.sa_tech_screens/`. If a selector misses, the
+  screenshot tells you which element to target; edit the
+  `SELECTOR_*` constants at the top of the script.
+- Fallback: you can still drop a manual UI export into the same folder
+  — `connectors/shop_apotheke_ads.py` reads everything there.
 
 ## Local dev
 

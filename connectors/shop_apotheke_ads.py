@@ -1,13 +1,13 @@
 """Shop Apotheke on-site (Sponsored Products / Display) ads connector.
 
-Shop Apotheke runs its on-site ads via Mirakl Ads / their internal sponsored
-platform, which currently has no public seller-facing API. The realistic
-ingest path is the weekly CSV export the platform UI lets you download
-(Reports → Performance → Export). Drop it in `inputs/shop_apotheke_ads/`
-and this connector picks it up.
-
-If/when an API becomes available, swap the body of `fetch()` to call it —
-the orchestrator's contract (return columns) stays the same.
+Shop Apotheke runs its on-site ads via the SA Retail Media platform at
+https://retail.sa-tech.de — no public API. The weekly GitHub Action
+runs `scripts/sa_tech_download.py` first (Playwright login + CSV
+download) which drops the file in `inputs/shop_apotheke_ads/`; this
+connector then reads everything in that folder. If the scraper is not
+configured (no SA_TECH_EMAIL / SA_TECH_PASSWORD) you can still drop
+the manual UI export in the same folder — the connector doesn't care
+which produced it.
 
 CSV format expected (any extra columns are ignored):
     date, campaign, spend, impressions, clicks, conversions, revenue
