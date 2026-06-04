@@ -16,9 +16,7 @@ It rebuilds a snapshot every Monday morning via GitHub Actions and
 publishes it to Streamlit Cloud. The dashboard URL is the same one you
 already use.
 
-## The two things you'll actually do
-
-### 1. Upload a new sa-tech ads CSV
+## Uploading a new sa-tech ads CSV
 
 Open the dashboard → sidebar → **📤 Ads CSV uploads** expander → drop
 the file → **Upload & refresh dashboard**.
@@ -39,16 +37,6 @@ campaign prefix, not the filename.
 
 `SOLD_OUT_*` campaigns are out-of-stock products; their spend gets
 pooled and split across SKUs by net-revenue share automatically.
-
-### 2. Manually trigger a rebuild
-
-If you change something in the repo (a code edit, an input file) and
-want the dashboard updated without waiting for Monday:
-
-GitHub → Actions → **Shop Apotheke Weekly Export** → **Run workflow**
-→ pick the working branch → Run.
-
-Same effect as a dashboard upload, minus the upload.
 
 ## Secrets that have to stay set
 
