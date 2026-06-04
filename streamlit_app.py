@@ -630,6 +630,18 @@ with tab_overview:
                 "Ad spend (€)": by_c["Ad spend (€)"].sum(),
             }])
             display = pd.concat([by_c, total], ignore_index=True)
+
+            def _cm3_color(v):
+                if pd.isna(v):
+                    return ""
+                if v >= 25:
+                    return "background:#C6EFCE; color:#0F5132"  # healthy green
+                if v >= 20:
+                    return "background:#E2F0D9; color:#1F5026"  # slight green
+                if v >= 15:
+                    return "background:#FFF2CC; color:#7F6000"  # amber
+                return "background:#F8CBAD; color:#7F2D14"      # red
+
             st.dataframe(
                 display.style.format({
                     "Sales (€)": "€{:,.0f}",
@@ -642,7 +654,7 @@ with tab_overview:
                     lambda row: ["font-weight:600; background:#F2F4F8"
                                  if row["Marketplace"] == "Total" else ""] * len(row),
                     axis=1,
-                ),
+                ).map(_cm3_color, subset=["Country CM3 %"]),
                 use_container_width=True, hide_index=True,
             )
             chart_df = by_c.copy()
