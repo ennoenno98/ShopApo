@@ -11,13 +11,15 @@ GB COGS × 0.83.
 """
 from __future__ import annotations
 
+import base64
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 
 from margin_model import (
@@ -117,8 +119,84 @@ def to_iso_week(s: pd.Series) -> pd.Series:
     return iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
 
 
+# ---------- ads CSV upload (browser → GitHub → workflow) ----------
+GH_OWNER = "ennoenno98"
+GH_REPO = "ShopApo"
+GH_BRANCH = "claude/awesome-hamilton-X7w62"
+GH_WORKFLOW = "weekly_export.yml"
+
+
+def _gh_token() -> str | None:
+    try:
+        return st.secrets["GITHUB_TOKEN"]
+    except Exception:
+        return os.environ.get("GITHUB_TOKEN")
+
+
+def render_upload_widget() -> None:
+    token = _gh_token()
+    with st.sidebar:
+        with st.expander("📤 Upload sa-tech ads CSV"):
+            if not token:
+                st.caption(
+                    "Disabled — set `GITHUB_TOKEN` in Streamlit secrets to enable. "
+                    "See repo README."
+                )
+                return
+            uploaded = st.file_uploader(
+                "Drop the weekly sa-tech CSV here (one or more)",
+                type=["csv"],
+                accept_multiple_files=True,
+                key="ads_upload",
+            )
+            if not uploaded:
+                return
+            if not st.button("Upload & refresh dashboard", type="primary"):
+                return
+
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            }
+            stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            for f in uploaded:
+                name = f"{stamp}_{f.name}"
+                url = (f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}"
+                       f"/contents/inputs/shop_apotheke_ads/{name}")
+                r = requests.put(
+                    url, headers=headers, timeout=30,
+                    json={
+                        "message": f"data: upload {name} via dashboard",
+                        "content": base64.b64encode(f.getvalue()).decode(),
+                        "branch": GH_BRANCH,
+                    },
+                )
+                if not r.ok:
+                    st.error(f"Upload failed for {f.name}: {r.status_code} {r.text}")
+                    return
+
+            dispatch = requests.post(
+                (f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}"
+                 f"/actions/workflows/{GH_WORKFLOW}/dispatches"),
+                headers=headers, timeout=30,
+                json={"ref": GH_BRANCH},
+            )
+            if dispatch.ok:
+                st.success(
+                    f"Uploaded {len(uploaded)} file(s) and triggered the rebuild. "
+                    f"Refresh the dashboard in ~3-5 minutes to see new numbers."
+                )
+            else:
+                st.warning(
+                    f"Files uploaded, but couldn't trigger the rebuild "
+                    f"({dispatch.status_code}). Run it manually at "
+                    f"github.com/{GH_OWNER}/{GH_REPO}/actions"
+                )
+
+
 # ============================ APP ============================
 require_login()
+render_upload_widget()
 
 path = latest_export()
 if path is None:
