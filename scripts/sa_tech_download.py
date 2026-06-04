@@ -185,18 +185,25 @@ def login(page, *, debug: bool) -> None:
         _dump_html(page, "01_login_loaded")
 
     # The landing page shows a "LOGIN" CTA button (and "Set new password"
-    # / "INTERNAL LOGIN" links). Click it to reveal the email/password
-    # modal/form. If the inputs are already visible, this click is a
+    # / "INTERNAL LOGIN" links). Click it to reveal the Microsoft B2C
+    # sign-in flow. If the inputs are already visible, this click is a
     # no-op — the next wait succeeds either way.
-    try:
-        login_button = page.get_by_role("button", name="LOGIN", exact=True)
-        if login_button.count() > 0:
+    login_button = page.locator(
+        'button:has-text("LOGIN"):not(:has-text("INTERNAL"))'
+    )
+    n = login_button.count()
+    log.info("Found %d 'LOGIN' button candidate(s) on landing page", n)
+    if n > 0:
+        try:
             login_button.first.click(timeout=5_000)
-            page.wait_for_load_state("networkidle", timeout=10_000)
+            page.wait_for_load_state("networkidle", timeout=15_000)
+            log.info("Clicked LOGIN; now at url=%s  title=%r",
+                     page.url, page.title())
             if debug:
                 _shoot(page, "01b_after_login_button")
-    except PWTimeout:
-        log.info("LOGIN button click didn't transition the page — assuming inputs are already in the DOM.")
+                _dump_html(page, "01b_after_login_button")
+        except PWTimeout:
+            log.info("LOGIN click didn't transition cleanly — proceeding anyway.")
 
     try:
         page.wait_for_selector(SELECTOR_EMAIL, timeout=15_000)
