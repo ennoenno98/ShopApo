@@ -232,10 +232,11 @@ else:
 
 # ---------- title bar ----------
 st.markdown(
-    "<div style='background:#1F3864; color:#fff; padding:14px 20px; "
-    "border-radius:6px; display:inline-flex; align-items:center; gap:10px; "
-    "font-size:1.6rem; font-weight:700; margin-bottom:6px;'>"
-    "📊 Margin Analytics</div>",
+    "<div style='display:flex; align-items:center; gap:14px; "
+    "margin: 4px 0 2px 0;'>"
+    "<span style='font-size:2.4rem; line-height:1;'>📊</span>"
+    "<span style='font-size:2rem; font-weight:700; color:#1A1A1A;'>"
+    "Margin Analytics</span></div>",
     unsafe_allow_html=True,
 )
 if not show_calculator_only:
@@ -277,6 +278,8 @@ if not show_calculator_only:
                     format_func=lambda kw: (
                         f"KW {int(kw.split('-W')[1])} · {kw.split('-W')[0]}"
                     ),
+                    help=("Pick one or more ISO calendar weeks. "
+                          "Empty = trailing 28 days."),
                 )
                 period_range = None
             else:
@@ -305,6 +308,8 @@ if not show_calculator_only:
             min_sales = st.number_input(
                 "Min monthly sales (€, all countries)",
                 min_value=0, value=2500 if top_only else 0, step=500,
+                help=("SKU is included only if its trailing-30-day net "
+                      "revenue across all countries is at least this amount."),
             )
         with r2[1]:
             trail_end = df["period"].max()
@@ -388,25 +393,16 @@ if not show_calculator_only:
 
     c = st.columns(5)
     with c[0]:
-        st.markdown("**SKUs in view**")
-        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
-                    f"{skus_in_view:,}</div>", unsafe_allow_html=True)
+        st.metric("SKUs in view", f"{skus_in_view:,}")
     with c[1]:
-        st.markdown("**Total sales (€)**")
-        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
-                    f"{total_sales:,.0f}</div>", unsafe_allow_html=True)
+        st.metric("Total sales (€)", f"{total_sales:,.0f}")
     with c[2]:
-        st.markdown("**P&L Impact (€)**", help="Sum of CM3 (margin after ad spend).")
-        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
-                    f"{pnl_impact:,.0f}</div>", unsafe_allow_html=True)
+        st.metric("P&L Impact (€)", f"{pnl_impact:,.0f}",
+                  help="Sum of CM3 — margin remaining after ad spend.")
     with c[3]:
-        st.markdown("**Avg CM3 %**")
-        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
-                    f"{avg_cm3:.1f}</div>", unsafe_allow_html=True)
+        st.metric("Avg CM3 %", f"{avg_cm3:.1f}")
     with c[4]:
-        st.markdown("**SKUs below 20% CM3**")
-        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
-                    f"{skus_below:,}</div>", unsafe_allow_html=True)
+        st.metric("SKUs below 20% CM3", f"{skus_below:,}")
 
 
 # ============================ TABS ============================
