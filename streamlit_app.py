@@ -105,15 +105,6 @@ def add_pct(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def kpi(label: str, value: float, prev: float | None = None,
-        money: bool = True, suffix: str = "") -> None:
-    fmt = (lambda x: f"€{x:,.0f}{suffix}") if money else (lambda x: f"{x:,.0f}{suffix}")
-    delta = None
-    if prev is not None and prev:
-        delta = f"{(value - prev) / abs(prev) * 100:+.1f}%"
-    st.metric(label, fmt(value), delta=delta)
-
-
 def to_iso_week(s: pd.Series) -> pd.Series:
     iso = s.dt.isocalendar()
     return iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
@@ -238,70 +229,184 @@ if path is None:
 else:
     show_calculator_only = False
     df = add_pct(load(path))
-    st.caption(f"Snapshot: **{path.name}** · {len(df):,} rows · "
-               f"{df['period'].min():%Y-%m-%d} → {df['period'].max():%Y-%m-%d}")
 
-# ---------- sidebar filters ----------
+# ---------- title bar ----------
+st.markdown(
+    "<div style='background:#1F3864; color:#fff; padding:14px 20px; "
+    "border-radius:6px; display:inline-flex; align-items:center; gap:10px; "
+    "font-size:1.6rem; font-weight:700; margin-bottom:6px;'>"
+    "📊 Margin Analytics</div>",
+    unsafe_allow_html=True,
+)
 if not show_calculator_only:
-    with st.sidebar:
-        st.header("Filter")
-        max_date = df["period"].max().date()
-        default_start = max_date - timedelta(days=28)
-        period_range = st.date_input(
-            "Period",
-            value=(default_start, max_date),
-            min_value=df["period"].min().date(),
-            max_value=max_date,
-        )
-        if isinstance(period_range, tuple) and len(period_range) == 2:
-            start, end = period_range
-        else:
-            start, end = default_start, max_date
-        skus = st.multiselect("SKU (empty = all)", sorted(df["sku"].dropna().unique()))
-        countries = st.multiselect("Country (empty = all)",
-                                   sorted(df["country"].dropna().unique()))
+    refreshed = datetime.utcfromtimestamp(path.stat().st_mtime)
+    st.caption(
+        f"Source: `{path.name}` · last refreshed "
+        f"{refreshed:%Y-%m-%d %H:%M UTC} · "
+        f"{len(df):,} rows · {df['sku'].nunique():,} SKUs"
+    )
 
-    f = df[(df["period"] >= pd.Timestamp(start)) & (df["period"] <= pd.Timestamp(end))]
-    if skus:
-        f = f[f["sku"].isin(skus)]
-    if countries:
-        f = f[f["country"].isin(countries)]
+# ---------- top filter card ----------
+if not show_calculator_only:
+    with st.container(border=True):
+        r1 = st.columns([1.6, 1.1, 2.2, 2.2, 1.2])
+
+        with r1[0]:
+            ALL = "🌍 All countries"
+            country_options = [ALL] + sorted(df["country"].dropna().unique())
+            country_sel = st.selectbox("Marketplace", country_options)
+
+        with r1[1]:
+            granularity = st.radio(
+                "Granularity",
+                ["Day", "Week", "Month", "Quarter"],
+                index=1,
+            )
+
+        with r1[2]:
+            if granularity == "Week":
+                iso = df["period"].dt.isocalendar()
+                kw_codes = (iso["year"].astype(str) + "-W"
+                            + iso["week"].astype(str).str.zfill(2))
+                kw_options = sorted(kw_codes.unique(), reverse=True)
+                kw_default = kw_options[:1]
+                kw_selected = st.multiselect(
+                    "Calendar week(s)",
+                    kw_options,
+                    default=kw_default,
+                    format_func=lambda kw: (
+                        f"KW {int(kw.split('-W')[1])} · {kw.split('-W')[0]}"
+                    ),
+                )
+                period_range = None
+            else:
+                kw_selected = []
+                max_date = df["period"].max().date()
+                default_start = max_date - timedelta(days=28)
+                period_range = st.date_input(
+                    "Period",
+                    value=(default_start, max_date),
+                    min_value=df["period"].min().date(),
+                    max_value=max_date,
+                )
+
+        with r1[3]:
+            sku_query = st.text_input(
+                "SKU or Product contains",
+                placeholder="e.g. ibuprofen, 12345678",
+            )
+
+        with r1[4]:
+            st.markdown("&nbsp;", unsafe_allow_html=True)
+            top_only = st.toggle("Top sellers only")
+
+        r2 = st.columns([2, 6])
+        with r2[0]:
+            min_sales = st.number_input(
+                "Min monthly sales (€, all countries)",
+                min_value=0, value=2500 if top_only else 0, step=500,
+            )
+        with r2[1]:
+            trail_end = df["period"].max()
+            trail_start = trail_end - pd.Timedelta(days=30)
+            trail = df[df["period"] > trail_start]
+            sku_30d = trail.groupby("sku")["net_revenue"].sum()
+            n_total = sku_30d.shape[0]
+            n_clear = int((sku_30d >= max(min_sales, 1)).sum()) if min_sales > 0 else n_total
+            highest = sku_30d.max() if not sku_30d.empty else 0
+            st.markdown("&nbsp;", unsafe_allow_html=True)
+            st.caption(
+                f"{n_clear:,} of {n_total:,} SKUs clear €{min_sales:,.0f}/mo "
+                f"(all countries). Trailing 30 days; highest is €{highest:,.0f}."
+            )
+
+    # ---------- derive filtered dataframe ----------
+    if granularity == "Week" and kw_selected:
+        mask = pd.Series(False, index=df.index)
+        starts, ends = [], []
+        for kw in kw_selected:
+            yr, wk = kw.split("-W")
+            s = pd.Timestamp.fromisocalendar(int(yr), int(wk), 1)
+            e = s + pd.Timedelta(days=6)
+            mask |= (df["period"] >= s) & (df["period"] <= e)
+            starts.append(s); ends.append(e)
+        f = df[mask].copy()
+        start, end = min(starts), max(ends)
+    elif granularity != "Week" and isinstance(period_range, tuple) and len(period_range) == 2:
+        start, end = pd.Timestamp(period_range[0]), pd.Timestamp(period_range[1])
+        f = df[(df["period"] >= start) & (df["period"] <= end)].copy()
+    else:
+        end = pd.Timestamp(df["period"].max())
+        start = end - pd.Timedelta(days=28)
+        f = df[(df["period"] >= start) & (df["period"] <= end)].copy()
+
+    if country_sel != ALL:
+        f = f[f["country"] == country_sel]
+
+    if sku_query:
+        q = sku_query.strip().lower()
+        f = f[
+            f["sku"].astype(str).str.lower().str.contains(q, na=False)
+            | f["product_title"].astype(str).str.lower().str.contains(q, na=False)
+        ]
+
+    if min_sales > 0:
+        eligible = set(sku_30d[sku_30d >= min_sales].index)
+        f = f[f["sku"].isin(eligible)]
 
     # Prior equal-length window for KPI deltas.
     span_days = (pd.Timestamp(end) - pd.Timestamp(start)).days + 1
     prev_end = pd.Timestamp(start) - pd.Timedelta(days=1)
     prev_start = prev_end - pd.Timedelta(days=span_days - 1)
-    prev = df[(df["period"] >= prev_start) & (df["period"] <= prev_end)]
-    if skus:
-        prev = prev[prev["sku"].isin(skus)]
-    if countries:
-        prev = prev[prev["country"].isin(countries)]
+    prev = df[(df["period"] >= prev_start) & (df["period"] <= prev_end)].copy()
+    if country_sel != ALL:
+        prev = prev[prev["country"] == country_sel]
+    if sku_query:
+        q = sku_query.strip().lower()
+        prev = prev[
+            prev["sku"].astype(str).str.lower().str.contains(q, na=False)
+            | prev["product_title"].astype(str).str.lower().str.contains(q, na=False)
+        ]
+    if min_sales > 0:
+        prev = prev[prev["sku"].isin(eligible)]
 
 
 # ============================ KPIs ============================
 if not show_calculator_only:
-    totals = f[["net_revenue", "CM1", "CM2", "CM3", "ad_spend", "orders", "units"]]\
-        .sum(numeric_only=True)
-    ptotals = prev[["net_revenue", "CM1", "CM2", "CM3", "ad_spend"]]\
-        .sum(numeric_only=True) if not prev.empty else None
+    by_sku_kpi = f.groupby("sku", as_index=False).agg(
+        net_revenue=("net_revenue", "sum"),
+        CM3=("CM3", "sum"),
+    )
+    by_sku_kpi["CM3%"] = (by_sku_kpi["CM3"]
+                          / by_sku_kpi["net_revenue"].replace(0, pd.NA) * 100)
 
-    c = st.columns(6)
-    with c[0]: kpi("Net revenue", totals["net_revenue"],
-                   ptotals["net_revenue"] if ptotals is not None else None)
-    with c[1]: kpi("CM1", totals["CM1"],
-                   ptotals["CM1"] if ptotals is not None else None)
-    with c[2]: kpi("CM2", totals["CM2"],
-                   ptotals["CM2"] if ptotals is not None else None)
-    with c[3]: kpi("CM3", totals["CM3"],
-                   ptotals["CM3"] if ptotals is not None else None)
-    with c[4]: kpi("Ad spend", totals["ad_spend"],
-                   ptotals["ad_spend"] if ptotals is not None else None)
-    with c[5]:
-        roas = totals["net_revenue"] / totals["ad_spend"] if totals["ad_spend"] else 0
-        st.metric("ROAS", f"{roas:,.2f}×")
+    skus_in_view = int(by_sku_kpi.shape[0])
+    total_sales = float(f["net_revenue"].sum())
+    pnl_impact = float(f["CM3"].sum())
+    avg_cm3 = (pnl_impact / total_sales * 100) if total_sales else 0.0
+    skus_below = int((by_sku_kpi["CM3%"] < 20).sum())
 
-    st.caption(f"vs. previous {span_days}-day window "
-               f"({prev_start.date()} → {prev_end.date()})")
+    c = st.columns(5)
+    with c[0]:
+        st.markdown("**SKUs in view**")
+        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
+                    f"{skus_in_view:,}</div>", unsafe_allow_html=True)
+    with c[1]:
+        st.markdown("**Total sales (€)**")
+        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
+                    f"{total_sales:,.0f}</div>", unsafe_allow_html=True)
+    with c[2]:
+        st.markdown("**P&L Impact (€)**", help="Sum of CM3 (margin after ad spend).")
+        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
+                    f"{pnl_impact:,.0f}</div>", unsafe_allow_html=True)
+    with c[3]:
+        st.markdown("**Avg CM3 %**")
+        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
+                    f"{avg_cm3:.1f}</div>", unsafe_allow_html=True)
+    with c[4]:
+        st.markdown("**SKUs below 20% CM3**")
+        st.markdown(f"<div style='font-size:2rem; font-weight:600'>"
+                    f"{skus_below:,}</div>", unsafe_allow_html=True)
 
 
 # ============================ TABS ============================
@@ -370,46 +475,61 @@ with tab_overview:
         st.plotly_chart(fig, use_container_width=True)
 
         # ---- Per-country breakdown ----
-        st.markdown("**Per-country breakdown** — Country CM3 % = total CM3 € / total Net Revenue € for that country.")
+        st.markdown(
+            "**Per-country breakdown** — Country CM3 % = total CM3 € / "
+            "total Sales € for that marketplace."
+        )
         by_c = f.groupby("country", as_index=False).agg(
             SKUs=("sku", "nunique"),
-            Units=("units", "sum"),
             Sales=("net_revenue", "sum"),
+            Units=("units", "sum"),
             CM3=("CM3", "sum"),
             AdSpend=("ad_spend", "sum"),
         )
         by_c["CM3%"] = by_c["CM3"] / by_c["Sales"].replace(0, pd.NA) * 100
         by_c = by_c.sort_values("Sales", ascending=False)
+        by_c = by_c.rename(columns={
+            "country": "Marketplace",
+            "Sales": "Sales (€)",
+            "CM3%": "Country CM3 %",
+            "CM3": "P&L Impact (€)",
+            "AdSpend": "Ad spend (€)",
+        })[["Marketplace", "SKUs", "Sales (€)", "Units",
+            "Country CM3 %", "P&L Impact (€)", "Ad spend (€)"]]
 
         if not by_c.empty:
             total = pd.DataFrame([{
-                "country": "Total",
+                "Marketplace": "Total",
                 "SKUs": by_c["SKUs"].sum(),
+                "Sales (€)": by_c["Sales (€)"].sum(),
                 "Units": by_c["Units"].sum(),
-                "Sales": by_c["Sales"].sum(),
-                "CM3": by_c["CM3"].sum(),
-                "AdSpend": by_c["AdSpend"].sum(),
-                "CM3%": (by_c["CM3"].sum() / by_c["Sales"].sum() * 100)
-                         if by_c["Sales"].sum() else pd.NA,
+                "Country CM3 %": (
+                    by_c["P&L Impact (€)"].sum() / by_c["Sales (€)"].sum() * 100
+                ) if by_c["Sales (€)"].sum() else pd.NA,
+                "P&L Impact (€)": by_c["P&L Impact (€)"].sum(),
+                "Ad spend (€)": by_c["Ad spend (€)"].sum(),
             }])
             display = pd.concat([by_c, total], ignore_index=True)
             st.dataframe(
                 display.style.format({
-                    "Sales": "€{:,.0f}", "CM3": "€{:,.0f}",
-                    "AdSpend": "€{:,.0f}", "CM3%": "{:.1f}%",
-                    "SKUs": "{:,.0f}", "Units": "{:,.0f}",
+                    "Sales (€)": "€{:,.0f}",
+                    "P&L Impact (€)": "€{:,.0f}",
+                    "Ad spend (€)": "€{:,.0f}",
+                    "Country CM3 %": "{:.1f}%",
+                    "SKUs": "{:,.0f}",
+                    "Units": "{:,.0f}",
                 }, na_rep="—").apply(
                     lambda row: ["font-weight:600; background:#F2F4F8"
-                                 if row["country"] == "Total" else ""] * len(row),
+                                 if row["Marketplace"] == "Total" else ""] * len(row),
                     axis=1,
                 ),
                 use_container_width=True, hide_index=True,
             )
             chart_df = by_c.copy()
             country_fig = go.Figure()
-            country_fig.add_bar(x=chart_df["country"], y=chart_df["Sales"],
+            country_fig.add_bar(x=chart_df["Marketplace"], y=chart_df["Sales (€)"],
                                 name="Sales (€)", marker_color="#1f3864")
-            country_fig.add_bar(x=chart_df["country"], y=chart_df["CM3"],
+            country_fig.add_bar(x=chart_df["Marketplace"], y=chart_df["P&L Impact (€)"],
                                 name="P&L Impact (€)", marker_color="#74AC2A")
             country_fig.update_layout(barmode="group",
                 yaxis_title="€", height=300,
