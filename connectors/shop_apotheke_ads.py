@@ -26,6 +26,7 @@ We map:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -90,26 +91,56 @@ def _to_date(series: pd.Series) -> pd.Series:
                           errors="coerce").dt.normalize()
 
 
-KNOWN_COUNTRIES = {"DE", "AT", "IT", "FR", "NL", "BE", "CH", "ES", "GB", "PL", "SE", "IE"}
+# sa-tech encodes the marketplace in the campaign-name prefix
+# (com_… = shop-apotheke.com = DE, at_… = AT, it_… = IT, etc.).
+# `SOLD_OUT_…` is a wrapper for OOS products and may sit in front of
+# any country prefix — we strip it to find the country, but keep it on
+# the campaign string so the allocator routes those rows to the
+# revenue-share pool rather than to a specific SKU.
+CAMPAIGN_COUNTRY_PREFIXES = {
+    "com_": "DE",
+    "at_":  "AT",
+    "it_":  "IT",
+    "fr_":  "FR",
+    "nl_":  "NL",
+    "be_":  "BE",
+    "ch_":  "CH",
+    "es_":  "ES",
+}
 
 
-def _country_from_filename(name: str) -> str:
-    """Extract country tag from filenames like `AT_20260604_103000_xxx.csv`.
+def _campaign_country(campaign: str) -> str | None:
+    name = str(campaign or "").strip().lower()
+    if name.startswith("sold_out_"):
+        name = name[len("sold_out_"):]
+    for prefix, country in CAMPAIGN_COUNTRY_PREFIXES.items():
+        if name.startswith(prefix):
+            return country
+    return None
 
-    Files uploaded via the dashboard get this prefix automatically. Files
-    that pre-date the prefix (or were committed manually) default to DE,
-    which is what the connector assumed before multi-country support."""
-    head = name.split("_", 1)[0].upper()
-    return head if head in KNOWN_COUNTRIES else "DE"
+
+def _file_hash(path: Path) -> str:
+    h = hashlib.md5()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _load_all() -> pd.DataFrame:
     if not INPUT_DIR.exists():
         raise ConnectorSkipped(f"{INPUT_DIR} does not exist")
     frames = []
-    # Sort ascending by filename so dashboard-uploaded files (prefixed with
-    # `YYYYMMDD_HHMMSS_`) end up last → their rows win during dedup below.
+    seen_hashes: dict[str, str] = {}
+    # Sort ascending so older files are seen first; identical re-uploads
+    # then fall under "skip" with a reference to the first copy.
     for f in sorted(INPUT_DIR.glob("*.csv")):
+        h = _file_hash(f)
+        if h in seen_hashes:
+            log.info("Skipping %s — identical content to %s (re-upload)",
+                     f.name, seen_hashes[h])
+            continue
+        seen_hashes[h] = f.name
         df = _read_one(f)
         if df is None or df.empty:
             continue
@@ -117,7 +148,6 @@ def _load_all() -> pd.DataFrame:
             log.warning("Skipping %s — missing one of date/campaign/spend (cols: %s)",
                         f.name, list(df.columns)[:6])
             continue
-        df["__country"] = _country_from_filename(f.name)
         frames.append(df)
     if not frames:
         raise ConnectorSkipped("no usable CSVs in inputs/shop_apotheke_ads/")
@@ -138,7 +168,6 @@ def fetch(start: datetime, end: datetime) -> pd.DataFrame:
     out = pd.DataFrame({
         "period": _to_date(raw[date_col]),
         "channel": "shop_apotheke_onsite",
-        "country": raw["__country"],
         "campaign": raw[camp_col].astype(str),
         "spend": _to_number(raw[spend_col]),
         "impressions": _to_number(raw[imp_col]) if imp_col else pd.NA,
@@ -147,6 +176,12 @@ def fetch(start: datetime, end: datetime) -> pd.DataFrame:
         "ad_revenue": _to_number(raw[rev_col]) if rev_col else pd.NA,
         "ean": raw[ean_col].astype(str) if ean_col else pd.NA,
     })
+    out["country"] = out["campaign"].map(_campaign_country)
+    unmapped = out["country"].isna().sum()
+    if unmapped:
+        log.warning("Shop Apotheke on-site ads: %d row(s) had unrecognized "
+                    "campaign prefix and were dropped", unmapped)
+        out = out.dropna(subset=["country"]).copy()
 
     mask = (out["period"] >= pd.Timestamp(start).normalize()) & \
            (out["period"] <= pd.Timestamp(end).normalize())
@@ -154,15 +189,21 @@ def fetch(start: datetime, end: datetime) -> pd.DataFrame:
     if out.empty:
         return pd.DataFrame()
 
-    # Dedup overlapping rows across uploaded CSVs. Same (country, period,
-    # campaign[, ean]) means the same underlying ad — keep the row from the
-    # most recently uploaded file (last in concat order, see _load_all).
-    dedup_keys = ["country", "period", "campaign"] + (["ean"] if ean_col else [])
+    # Aggregate. sa-tech sometimes emits multiple legitimately-distinct rows
+    # for the same (country, date, campaign, ean) — different daypart/
+    # placement buckets that report separately. Summing here is what gives
+    # the correct daily spend. (Identical re-uploaded files were already
+    # discarded at load time via _file_hash, so we are not double-counting.)
+    group_keys = ["country", "period", "campaign"] + (["ean"] if ean_col else [])
+    metric_cols = [c for c in ("spend", "impressions", "clicks",
+                               "conversions", "ad_revenue")
+                   if c in out.columns]
     before = len(out)
-    out = out.drop_duplicates(subset=dedup_keys, keep="last")
+    out = out.groupby(group_keys, as_index=False)[metric_cols].sum(min_count=1)
+    out["channel"] = "shop_apotheke_onsite"
     if before != len(out):
-        log.info("Shop Apotheke on-site ads: dropped %d duplicate row(s) "
-                 "across overlapping CSVs", before - len(out))
+        log.info("Shop Apotheke on-site ads: collapsed %d → %d rows by "
+                 "summing same-key entries", before, len(out))
 
     log.info("Shop Apotheke on-site ads: %d rows, %s → %s, total spend €%.2f",
              len(out), out["period"].min().date(), out["period"].max().date(),

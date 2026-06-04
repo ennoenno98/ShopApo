@@ -125,6 +125,22 @@ def _gh_token() -> str | None:
 
 
 ADS_INPUT_DIR = REPO_ROOT / "inputs" / "shop_apotheke_ads"
+MASTER_ADS_FILE = ADS_INPUT_DIR / "master_advertiserreport.csv"
+
+CAMPAIGN_COUNTRY_PREFIXES = {
+    "com_": "DE", "at_": "AT", "it_": "IT", "fr_": "FR",
+    "nl_": "NL", "be_": "BE", "ch_": "CH", "es_": "ES",
+}
+
+
+def _campaign_country(campaign: str) -> str | None:
+    n = str(campaign or "").strip().lower()
+    if n.startswith("sold_out_"):
+        n = n[len("sold_out_"):]
+    for p, c in CAMPAIGN_COUNTRY_PREFIXES.items():
+        if n.startswith(p):
+            return c
+    return None
 
 
 def _list_ads_files() -> list[tuple[str, datetime, int]]:
@@ -135,6 +151,50 @@ def _list_ads_files() -> list[tuple[str, datetime, int]]:
         stat = f.stat()
         out.append((f.name, datetime.utcfromtimestamp(stat.st_mtime), stat.st_size))
     return sorted(out, key=lambda x: x[1], reverse=True)
+
+
+def _ads_periods(path_or_bytes) -> set[tuple[str, str]]:
+    """Return the set of (country, ISO-date) tuples present in an ads CSV."""
+    try:
+        df = pd.read_csv(path_or_bytes, sep=";", dtype=str,
+                          usecols=["campaign", "date"])
+    except Exception:
+        return set()
+    df.columns = [c.strip().lower() for c in df.columns]
+    df["country"] = df["campaign"].map(_campaign_country)
+    df["d"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
+    df = df.dropna(subset=["country", "d"])
+    return set(zip(df["country"], df["d"].dt.strftime("%Y-%m-%d")))
+
+
+def _merge_into_master(new_bytes: bytes) -> tuple[bytes, int, int]:
+    """Drop existing master rows for any (country, date) that the new upload
+    covers, then append new rows. Returns (merged_csv_bytes, replaced_periods,
+    added_rows)."""
+    import io
+    new_df = pd.read_csv(io.BytesIO(new_bytes), sep=";", dtype=str)
+    new_df.columns = [c.strip() for c in new_df.columns]
+    # Use lowercased copies only for matching keys, keep originals for output.
+    new_country = new_df["campaign"].map(_campaign_country)
+    new_date = pd.to_datetime(new_df["date"], dayfirst=True, errors="coerce")
+    overlap_keys = set(zip(new_country.dropna(),
+                            new_date.dropna().dt.strftime("%Y-%m-%d")))
+
+    if MASTER_ADS_FILE.exists():
+        master_df = pd.read_csv(MASTER_ADS_FILE, sep=";", dtype=str)
+        master_df.columns = [c.strip() for c in master_df.columns]
+        m_country = master_df["campaign"].map(_campaign_country)
+        m_date = pd.to_datetime(master_df["date"], dayfirst=True, errors="coerce")
+        m_keys = list(zip(m_country, m_date.dt.strftime("%Y-%m-%d")))
+        keep = [k not in overlap_keys for k in m_keys]
+        master_df = master_df[keep]
+    else:
+        master_df = pd.DataFrame(columns=new_df.columns)
+
+    merged = pd.concat([master_df, new_df], ignore_index=True, sort=False)
+    buf = io.BytesIO()
+    merged.to_csv(buf, sep=";", index=False)
+    return buf.getvalue(), len(overlap_keys), len(new_df)
 
 
 def render_upload_widget() -> None:
@@ -165,18 +225,10 @@ def render_upload_widget() -> None:
                     "Upload disabled — set `GITHUB_TOKEN` in Streamlit secrets to enable."
                 )
                 return
-            country_code = st.selectbox(
-                "Marketplace this CSV is for",
-                ["DE", "AT", "IT", "FR", "NL", "BE", "CH"],
-                help=("sa-tech exports one report per advertiser/country. "
-                      "Pick the marketplace the CSV is for — the file is "
-                      "stored under that country tag so its spend is "
-                      "attributed correctly."),
-                key="ads_upload_country",
-            )
             uploaded = st.file_uploader(
-                "Drop a new sa-tech CSV here (one or more — all tagged "
-                f"as {country_code})",
+                "Drop a new sa-tech advertiser report here (one master CSV "
+                "covering all marketplaces is enough — country comes from "
+                "each row's campaign prefix)",
                 type=["csv"],
                 accept_multiple_files=True,
                 key="ads_upload",
@@ -190,22 +242,44 @@ def render_upload_widget() -> None:
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
             }
-            stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            master_path = "inputs/shop_apotheke_ads/master_advertiserreport.csv"
+            # Each upload is merged sequentially into the master, so a second
+            # file's (country, period) keys override the first's if they
+            # overlap — same precedence as if uploaded one at a time.
+            total_replaced = 0
+            total_added = 0
             for f in uploaded:
-                name = f"{country_code}_{stamp}_{f.name}"
-                url = (f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}"
-                       f"/contents/inputs/shop_apotheke_ads/{name}")
-                r = requests.put(
-                    url, headers=headers, timeout=30,
-                    json={
-                        "message": f"data: upload {name} via dashboard",
-                        "content": base64.b64encode(f.getvalue()).decode(),
-                        "branch": GH_BRANCH,
-                    },
-                )
-                if not r.ok:
-                    st.error(f"Upload failed for {f.name}: {r.status_code} {r.text}")
-                    return
+                merged_bytes, replaced, added = _merge_into_master(f.getvalue())
+                total_replaced += replaced
+                total_added += added
+                # Refresh local master so subsequent uploads see the latest.
+                MASTER_ADS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                MASTER_ADS_FILE.write_bytes(merged_bytes)
+
+            # Fetch SHA of existing master, then PUT the merged content.
+            sha = None
+            r = requests.get(
+                f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/contents/{master_path}",
+                headers=headers, params={"ref": GH_BRANCH}, timeout=30,
+            )
+            if r.ok:
+                sha = r.json().get("sha")
+
+            r = requests.put(
+                f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}/contents/{master_path}",
+                headers=headers, timeout=60,
+                json={
+                    "message": (f"data: merge {len(uploaded)} upload(s) into "
+                                f"master (replaced {total_replaced} period(s), "
+                                f"added ≤{total_added} rows)"),
+                    "content": base64.b64encode(MASTER_ADS_FILE.read_bytes()).decode(),
+                    "branch": GH_BRANCH,
+                    **({"sha": sha} if sha else {}),
+                },
+            )
+            if not r.ok:
+                st.error(f"Master update failed: {r.status_code} {r.text}")
+                return
 
             dispatch = requests.post(
                 (f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}"
@@ -215,12 +289,13 @@ def render_upload_widget() -> None:
             )
             if dispatch.ok:
                 st.success(
-                    f"Uploaded {len(uploaded)} file(s) and triggered the rebuild. "
-                    f"Refresh the dashboard in ~3-5 minutes to see new numbers."
+                    f"Merged {len(uploaded)} file(s) into master "
+                    f"(replaced {total_replaced} pre-existing period(s)). "
+                    f"Refresh the dashboard in ~3-5 minutes."
                 )
             else:
                 st.warning(
-                    f"Files uploaded, but couldn't trigger the rebuild "
+                    f"Merged, but couldn't trigger the rebuild "
                     f"({dispatch.status_code}). Run it manually at "
                     f"github.com/{GH_OWNER}/{GH_REPO}/actions"
                 )
