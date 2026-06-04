@@ -8,14 +8,15 @@ Used in the weekly GitHub Action so team members can just drop the
 sa-tech CSV exports into a OneDrive folder and the dashboard refreshes
 itself.
 
-Auth uses the Microsoft Graph app-only (client credentials) flow:
-    GRAPH_TENANT_ID
-    GRAPH_CLIENT_ID
-    GRAPH_CLIENT_SECRET
-    ONEDRIVE_SHARED_LINK    full URL of the shared folder
+Auth (tries each in order until one works):
+  1. **Anonymous** — works if the share is set to "Anyone with the link
+     can view". Just needs ONEDRIVE_SHARED_LINK.
+  2. **Microsoft Graph app-only** — fallback when anonymous is blocked.
+     Needs GRAPH_TENANT_ID + GRAPH_CLIENT_ID + GRAPH_CLIENT_SECRET, plus
+     a one-time Azure app registration with Files.Read.All.
 
-If any of these are missing the script no-ops with a warning, so the
-rest of the weekly export keeps running.
+If ONEDRIVE_SHARED_LINK is missing entirely, the script no-ops with a
+warning so the rest of the weekly export keeps running.
 """
 from __future__ import annotations
 
@@ -59,23 +60,26 @@ def _token(tenant: str, client_id: str, client_secret: str) -> str:
     return r.json()["access_token"]
 
 
-def _list_children(token: str, share_id: str) -> list[dict]:
-    headers = {"Authorization": f"Bearer {token}"}
+def _list_children(share_id: str, token: str | None) -> list[dict]:
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     r = requests.get(
         f"https://graph.microsoft.com/v1.0/shares/{share_id}/driveItem/children",
         headers=headers, timeout=30,
     )
+    if r.status_code == 401 and token is None:
+        raise PermissionError("Anonymous access denied (401)")
     r.raise_for_status()
     return r.json().get("value", [])
 
 
-def _download(token: str, item: dict, target: Path) -> None:
-    headers = {"Authorization": f"Bearer {token}"}
+def _download(item: dict, target: Path, token: str | None) -> None:
     download_url = item.get("@microsoft.graph.downloadUrl")
     if download_url:
-        # The download URL is a short-lived pre-authenticated SAS link.
+        # The download URL is a short-lived pre-authenticated SAS link
+        # — no Authorization header needed.
         r = requests.get(download_url, timeout=120, stream=True)
     else:
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
         r = requests.get(
             f"https://graph.microsoft.com/v1.0/drives/{item['parentReference']['driveId']}"
             f"/items/{item['id']}/content",
@@ -89,27 +93,34 @@ def _download(token: str, item: dict, target: Path) -> None:
 
 
 def main() -> None:
-    tenant = os.environ.get("GRAPH_TENANT_ID")
-    client_id = os.environ.get("GRAPH_CLIENT_ID")
-    client_secret = os.environ.get("GRAPH_CLIENT_SECRET")
     share_url = os.environ.get("ONEDRIVE_SHARED_LINK")
-
-    missing = [k for k, v in {
-        "GRAPH_TENANT_ID": tenant,
-        "GRAPH_CLIENT_ID": client_id,
-        "GRAPH_CLIENT_SECRET": client_secret,
-        "ONEDRIVE_SHARED_LINK": share_url,
-    }.items() if not v]
-    if missing:
-        log.warning("OneDrive sync skipped — missing env vars: %s", ", ".join(missing))
+    if not share_url:
+        log.warning("OneDrive sync skipped — ONEDRIVE_SHARED_LINK not set.")
         return
 
-    log.info("Authenticating with Microsoft Graph (tenant %s)…", tenant[:8] + "…")
-    token = _token(tenant, client_id, client_secret)
-
     share_id = _encode_share_id(share_url)
-    log.info("Listing shared folder contents…")
-    items = _list_children(token, share_id)
+    token: str | None = None
+
+    log.info("Trying anonymous access to the shared folder…")
+    try:
+        items = _list_children(share_id, None)
+        log.info("Anonymous access OK.")
+    except (PermissionError, requests.HTTPError) as e:
+        log.info("Anonymous access not allowed (%s) — falling back to Microsoft Graph app auth.", e)
+        tenant = os.environ.get("GRAPH_TENANT_ID")
+        client_id = os.environ.get("GRAPH_CLIENT_ID")
+        client_secret = os.environ.get("GRAPH_CLIENT_SECRET")
+        if not (tenant and client_id and client_secret):
+            log.warning(
+                "Cannot fall back to OAuth — GRAPH_TENANT_ID / GRAPH_CLIENT_ID / "
+                "GRAPH_CLIENT_SECRET not all set. Either make the OneDrive link "
+                "'Anyone with the link can view', or register an Azure app with "
+                "Files.Read.All and add those three secrets."
+            )
+            return
+        token = _token(tenant, client_id, client_secret)
+        items = _list_children(share_id, token)
+
     log.info("Found %d items in shared folder", len(items))
 
     csv_items = [
@@ -132,7 +143,7 @@ def main() -> None:
             continue
         log.info("  · %s — downloading (%.1f KB)…",
                  name, (it.get("size") or 0) / 1024)
-        _download(token, it, target)
+        _download(it, target, token)
         new_count += 1
     log.info("Sync complete: %d new file(s) pulled into %s", new_count, OUTPUT_DIR)
 

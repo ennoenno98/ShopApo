@@ -40,7 +40,7 @@ jobs:
         run: pip install -r requirements-export.txt
 
       - name: Sync ads CSVs from OneDrive
-        if: ${{ env.GRAPH_CLIENT_ID != '' }}
+        if: ${{ env.ONEDRIVE_SHARED_LINK != '' }}
         continue-on-error: true
         run: python scripts/onedrive_sync.py
 
