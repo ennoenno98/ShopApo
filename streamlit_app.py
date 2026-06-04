@@ -75,29 +75,73 @@ def latest_export() -> Path | None:
     return files[-1] if files else None
 
 
+_FLOAT_COLS = ("gross_revenue", "refunded", "net_revenue", "commission",
+               "shipping_cost_net", "product_cost", "dhl_cost",
+               "three_pl_cost", "CM1", "CM2", "CM3", "ad_spend")
+_INT_COLS = ("orders", "units")
+_CATEGORICAL_COLS = ("sku", "country", "product_title")
+
+
 @st.cache_data(show_spinner=False)
 def load(path: Path) -> pd.DataFrame:
+    """Read the snapshot CSV with downcast dtypes + derived CM%-of-revenue
+    columns baked in, so we hold one compact frame in memory per session."""
     df = pd.read_csv(path)
     df["period"] = pd.to_datetime(df["period"], errors="coerce").dt.normalize()
-    for c in ("orders", "units", "gross_revenue", "refunded", "net_revenue",
-              "commission", "shipping_cost_net", "product_cost",
-              "dhl_cost", "three_pl_cost", "CM1", "CM2", "CM3", "ad_spend"):
+    for c in _FLOAT_COLS:
         if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
-
-
-def add_pct(df: pd.DataFrame) -> pd.DataFrame:
+            df[c] = pd.to_numeric(df[c], errors="coerce", downcast="float")
+    for c in _INT_COLS:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce", downcast="integer")
+    for c in _CATEGORICAL_COLS:
+        if c in df.columns:
+            df[c] = df[c].astype("category")
+    # Bake CM%-of-net-revenue once instead of recomputing on every interaction.
     rev = df["net_revenue"].replace(0, pd.NA)
     for cm in ("CM1", "CM2", "CM3"):
         if cm in df.columns:
-            df[f"{cm}%"] = df[cm] / rev * 100
+            df[f"{cm}%"] = (df[cm] / rev * 100).astype("float32")
     return df
 
 
 def to_iso_week(s: pd.Series) -> pd.Series:
     iso = s.dt.isocalendar()
     return iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
+
+
+@st.cache_data(show_spinner=False)
+def period_options(periods: tuple[pd.Timestamp, ...], granularity: str) -> list[str]:
+    """Memoize the unique period-bucket strings shown in the filter dropdowns.
+
+    Keyed on the (immutable) tuple of unique snapshot dates so the cache
+    invalidates only when the snapshot itself changes — not on every rerun."""
+    s = pd.to_datetime(pd.Series(periods))
+    if granularity == "Day":
+        codes = s.dt.strftime("%Y-%m-%d")
+    elif granularity == "Week":
+        iso = s.dt.isocalendar()
+        codes = iso["year"].astype(str) + "-W" + iso["week"].astype(str).str.zfill(2)
+    elif granularity == "Month":
+        codes = s.dt.strftime("%Y-%m")
+    else:  # Quarter
+        codes = s.dt.year.astype(str) + "-Q" + s.dt.quarter.astype(str)
+    return sorted(codes.unique(), reverse=True)
+
+
+@st.cache_data(show_spinner=False)
+def trailing_30d_sku_sales(periods: tuple[pd.Timestamp, ...],
+                            skus: tuple, revenues: tuple[float, ...]
+                            ) -> pd.Series:
+    """Aggregate trailing-30-day net revenue per SKU.
+
+    Cached against the raw inputs so the eligibility check (Min monthly
+    sales threshold) doesn't re-run a full groupby on every keystroke."""
+    df = pd.DataFrame({"period": periods, "sku": skus, "rev": revenues})
+    df["period"] = pd.to_datetime(df["period"])
+    cutoff = df["period"].max() - pd.Timedelta(days=30)
+    df = df[df["period"] > cutoff]
+    return df.groupby("sku")["rev"].sum()
 
 
 # ---------- ads CSV upload (browser → GitHub → workflow) ----------
@@ -303,7 +347,7 @@ if path is None:
     df = pd.DataFrame()
 else:
     show_calculator_only = False
-    df = add_pct(load(path))
+    df = load(path)
 
 # ---------- title bar ----------
 st.markdown(
@@ -340,46 +384,23 @@ if not show_calculator_only:
             )
 
         with r1[2]:
-            period_selected: list[str] = []
-            if granularity == "Day":
-                day_options = sorted(
-                    df["period"].dt.strftime("%Y-%m-%d").unique(), reverse=True,
-                )
-                period_selected = st.multiselect(
-                    "Day(s)", day_options, default=day_options[:1],
-                    help="Pick one or more days. Empty = trailing 28 days.",
-                )
-            elif granularity == "Week":
-                iso = df["period"].dt.isocalendar()
-                week_options = sorted((
-                    iso["year"].astype(str) + "-W"
-                    + iso["week"].astype(str).str.zfill(2)
-                ).unique(), reverse=True)
-                period_selected = st.multiselect(
-                    "Calendar week(s)",
-                    week_options, default=week_options[:1],
-                    format_func=lambda kw: (
-                        f"KW {int(kw.split('-W')[1])} · {kw.split('-W')[0]}"
-                    ),
-                    help="Pick one or more ISO calendar weeks. Empty = trailing 28 days.",
-                )
-            elif granularity == "Month":
-                month_codes = df["period"].dt.strftime("%Y-%m")
-                month_options = sorted(month_codes.unique(), reverse=True)
-                period_selected = st.multiselect(
-                    "Month(s)", month_options, default=month_options[:1],
-                    format_func=lambda ym: pd.Timestamp(ym + "-01").strftime("%B %Y"),
-                    help="Pick one or more months. Empty = trailing 28 days.",
-                )
-            else:  # Quarter
-                q_codes = (df["period"].dt.year.astype(str) + "-Q"
-                           + df["period"].dt.quarter.astype(str))
-                q_options = sorted(q_codes.unique(), reverse=True)
-                period_selected = st.multiselect(
-                    "Quarter(s)", q_options, default=q_options[:1],
-                    format_func=lambda q: f"Q{q.split('-Q')[1]} · {q.split('-Q')[0]}",
-                    help="Pick one or more calendar quarters. Empty = trailing 28 days.",
-                )
+            unique_periods = tuple(df["period"].drop_duplicates().sort_values())
+            options = period_options(unique_periods, granularity)
+            label = {
+                "Day": "Day(s)", "Week": "Calendar week(s)",
+                "Month": "Month(s)", "Quarter": "Quarter(s)",
+            }[granularity]
+            fmt = {
+                "Day": lambda x: x,
+                "Week": lambda kw: f"KW {int(kw.split('-W')[1])} · {kw.split('-W')[0]}",
+                "Month": lambda ym: pd.Timestamp(ym + "-01").strftime("%B %Y"),
+                "Quarter": lambda q: f"Q{q.split('-Q')[1]} · {q.split('-Q')[0]}",
+            }[granularity]
+            period_selected = st.multiselect(
+                label, options, default=options[:1], format_func=fmt,
+                help=f"Pick one or more {label.lower().rstrip('(s)')}. "
+                     "Empty = trailing 28 days.",
+            )
 
         with r1[3]:
             sku_query = st.text_input(
@@ -400,10 +421,11 @@ if not show_calculator_only:
                       "revenue across all countries is at least this amount."),
             )
         with r2[1]:
-            trail_end = df["period"].max()
-            trail_start = trail_end - pd.Timedelta(days=30)
-            trail = df[df["period"] > trail_start]
-            sku_30d = trail.groupby("sku")["net_revenue"].sum()
+            sku_30d = trailing_30d_sku_sales(
+                tuple(df["period"]),
+                tuple(df["sku"]),
+                tuple(df["net_revenue"].fillna(0)),
+            )
             n_total = sku_30d.shape[0]
             n_clear = int((sku_30d >= max(min_sales, 1)).sum()) if min_sales > 0 else n_total
             highest = sku_30d.max() if not sku_30d.empty else 0
