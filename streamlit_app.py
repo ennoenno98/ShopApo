@@ -350,32 +350,45 @@ if not show_calculator_only:
             )
 
         with r1[2]:
-            if granularity == "Week":
+            period_selected: list[str] = []
+            if granularity == "Day":
+                day_options = sorted(
+                    df["period"].dt.strftime("%Y-%m-%d").unique(), reverse=True,
+                )
+                period_selected = st.multiselect(
+                    "Day(s)", day_options, default=day_options[:1],
+                    help="Pick one or more days. Empty = trailing 28 days.",
+                )
+            elif granularity == "Week":
                 iso = df["period"].dt.isocalendar()
-                kw_codes = (iso["year"].astype(str) + "-W"
-                            + iso["week"].astype(str).str.zfill(2))
-                kw_options = sorted(kw_codes.unique(), reverse=True)
-                kw_default = kw_options[:1]
-                kw_selected = st.multiselect(
+                week_options = sorted((
+                    iso["year"].astype(str) + "-W"
+                    + iso["week"].astype(str).str.zfill(2)
+                ).unique(), reverse=True)
+                period_selected = st.multiselect(
                     "Calendar week(s)",
-                    kw_options,
-                    default=kw_default,
+                    week_options, default=week_options[:1],
                     format_func=lambda kw: (
                         f"KW {int(kw.split('-W')[1])} · {kw.split('-W')[0]}"
                     ),
-                    help=("Pick one or more ISO calendar weeks. "
-                          "Empty = trailing 28 days."),
+                    help="Pick one or more ISO calendar weeks. Empty = trailing 28 days.",
                 )
-                period_range = None
-            else:
-                kw_selected = []
-                max_date = df["period"].max().date()
-                default_start = max_date - timedelta(days=28)
-                period_range = st.date_input(
-                    "Period",
-                    value=(default_start, max_date),
-                    min_value=df["period"].min().date(),
-                    max_value=max_date,
+            elif granularity == "Month":
+                month_codes = df["period"].dt.strftime("%Y-%m")
+                month_options = sorted(month_codes.unique(), reverse=True)
+                period_selected = st.multiselect(
+                    "Month(s)", month_options, default=month_options[:1],
+                    format_func=lambda ym: pd.Timestamp(ym + "-01").strftime("%B %Y"),
+                    help="Pick one or more months. Empty = trailing 28 days.",
+                )
+            else:  # Quarter
+                q_codes = (df["period"].dt.year.astype(str) + "-Q"
+                           + df["period"].dt.quarter.astype(str))
+                q_options = sorted(q_codes.unique(), reverse=True)
+                period_selected = st.multiselect(
+                    "Quarter(s)", q_options, default=q_options[:1],
+                    format_func=lambda q: f"Q{q.split('-Q')[1]} · {q.split('-Q')[0]}",
+                    help="Pick one or more calendar quarters. Empty = trailing 28 days.",
                 )
 
         with r1[3]:
@@ -411,20 +424,31 @@ if not show_calculator_only:
             )
 
     # ---------- derive filtered dataframe ----------
-    if granularity == "Week" and kw_selected:
+    def _bounds(code: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+        if granularity == "Day":
+            d = pd.Timestamp(code)
+            return d, d
+        if granularity == "Week":
+            yr, wk = code.split("-W")
+            s = pd.Timestamp.fromisocalendar(int(yr), int(wk), 1)
+            return s, s + pd.Timedelta(days=6)
+        if granularity == "Month":
+            s = pd.Timestamp(code + "-01")
+            return s, (s + pd.offsets.MonthEnd(0)).normalize()
+        # Quarter
+        yr, q = code.split("-Q")
+        s = pd.Timestamp(year=int(yr), month=(int(q) - 1) * 3 + 1, day=1)
+        return s, (s + pd.offsets.QuarterEnd(startingMonth=3)).normalize()
+
+    if period_selected:
         mask = pd.Series(False, index=df.index)
         starts, ends = [], []
-        for kw in kw_selected:
-            yr, wk = kw.split("-W")
-            s = pd.Timestamp.fromisocalendar(int(yr), int(wk), 1)
-            e = s + pd.Timedelta(days=6)
+        for code in period_selected:
+            s, e = _bounds(code)
             mask |= (df["period"] >= s) & (df["period"] <= e)
             starts.append(s); ends.append(e)
         f = df[mask].copy()
         start, end = min(starts), max(ends)
-    elif granularity != "Week" and isinstance(period_range, tuple) and len(period_range) == 2:
-        start, end = pd.Timestamp(period_range[0]), pd.Timestamp(period_range[1])
-        f = df[(df["period"] >= start) & (df["period"] <= end)].copy()
     else:
         end = pd.Timestamp(df["period"].max())
         start = end - pd.Timedelta(days=28)
