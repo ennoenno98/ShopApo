@@ -98,10 +98,14 @@ def load(path: Path) -> pd.DataFrame:
         if c in df.columns:
             df[c] = df[c].astype("category")
     # Bake CM%-of-net-revenue once instead of recomputing on every interaction.
-    rev = df["net_revenue"].replace(0, pd.NA)
+    # Use float NaN (not pd.NA) so the division stays in plain float32 — pd.NA
+    # produces a nullable Float dtype that won't downcast.
+    import numpy as np
+    rev = df["net_revenue"].replace(0, np.nan)
     for cm in ("CM1", "CM2", "CM3"):
         if cm in df.columns:
-            df[f"{cm}%"] = (df[cm] / rev * 100).astype("float32")
+            df[f"{cm}%"] = (df[cm].astype("float32")
+                            / rev.astype("float32") * 100)
     return df
 
 
