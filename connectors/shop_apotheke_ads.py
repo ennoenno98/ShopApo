@@ -94,6 +94,8 @@ def _load_all() -> pd.DataFrame:
     if not INPUT_DIR.exists():
         raise ConnectorSkipped(f"{INPUT_DIR} does not exist")
     frames = []
+    # Sort ascending by filename so dashboard-uploaded files (prefixed with
+    # `YYYYMMDD_HHMMSS_`) end up last → their rows win during dedup below.
     for f in sorted(INPUT_DIR.glob("*.csv")):
         df = _read_one(f)
         if df is None or df.empty:
@@ -136,6 +138,16 @@ def fetch(start: datetime, end: datetime) -> pd.DataFrame:
     out = out[mask].copy()
     if out.empty:
         return pd.DataFrame()
+
+    # Dedup overlapping rows across uploaded CSVs. Same (period, campaign[, ean])
+    # means the same underlying ad — keep the row from the most recently
+    # uploaded file (last in concat order, see _load_all).
+    dedup_keys = ["period", "campaign"] + (["ean"] if ean_col else [])
+    before = len(out)
+    out = out.drop_duplicates(subset=dedup_keys, keep="last")
+    if before != len(out):
+        log.info("Shop Apotheke on-site ads: dropped %d duplicate row(s) "
+                 "across overlapping CSVs", before - len(out))
 
     log.info("Shop Apotheke on-site ads: %d rows, %s → %s, total spend €%.2f",
              len(out), out["period"].min().date(), out["period"].max().date(),
