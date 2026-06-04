@@ -70,11 +70,30 @@ SELECTOR_EMAIL = 'input[type="email"], input[name="email"], input[name="username
 SELECTOR_PASSWORD = 'input[type="password"]'
 SELECTOR_LOGIN_SUBMIT = 'button[type="submit"], button:has-text("Login"), button:has-text("Anmelden"), button:has-text("Sign in")'
 
-# Reports page selectors.
-SELECTOR_DATE_FROM = 'input[name*="from" i], input[name*="start" i], input[placeholder*="from" i], input[placeholder*="start" i]'
-SELECTOR_DATE_TO = 'input[name*="to" i], input[name*="end" i], input[placeholder*="to" i], input[placeholder*="end" i]'
-SELECTOR_RUN_REPORT = 'button:has-text("Apply"), button:has-text("Run"), button:has-text("Search"), button:has-text("Anwenden"), button:has-text("Suchen")'
-SELECTOR_DOWNLOAD = 'a:has-text("Download"), a:has-text("Export"), button:has-text("Download"), button:has-text("Export"), button:has-text("CSV"), a:has-text("CSV")'
+# Reports page selectors — sa-tech uses MUI X DateRangePicker; each side
+# has 3 contenteditable spinbuttons (Day / Month / Year) marked with
+# data-range-position. We target those directly rather than chasing a
+# nonexistent <input>.
+SELECTOR_DATE_START_DAY = '[data-range-position="start"][aria-label="Day"]'
+SELECTOR_DATE_START_MONTH = '[data-range-position="start"][aria-label="Month"]'
+SELECTOR_DATE_START_YEAR = '[data-range-position="start"][aria-label="Year"]'
+SELECTOR_DATE_END_DAY = '[data-range-position="end"][aria-label="Day"]'
+SELECTOR_DATE_END_MONTH = '[data-range-position="end"][aria-label="Month"]'
+SELECTOR_DATE_END_YEAR = '[data-range-position="end"][aria-label="Year"]'
+SELECTOR_RUN_REPORT = (
+    'button:has-text("Apply"), button:has-text("Run"), button:has-text("Search"), '
+    'button:has-text("Anwenden"), button:has-text("Suchen"), '
+    'button:has-text("Aktualisieren"), button:has-text("Ausführen")'
+)
+# Download button: literal text in DE/EN, plus icon-button aria-labels.
+SELECTOR_DOWNLOAD = (
+    'a:has-text("Download"), a:has-text("Export"), a:has-text("CSV"), '
+    'a:has-text("Herunterladen"), a:has-text("Exportieren"), '
+    'button:has-text("Download"), button:has-text("Export"), button:has-text("CSV"), '
+    'button:has-text("Herunterladen"), button:has-text("Exportieren"), '
+    'button[aria-label*="Download" i], button[aria-label*="Export" i], '
+    'button[aria-label*="herunterladen" i]'
+)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "inputs" / "shop_apotheke_ads"
 # Plain dir name (no leading dot) so `actions/upload-artifact` picks it up
@@ -222,24 +241,49 @@ def go_to_reports(page, *, debug: bool) -> None:
         _shoot(page, "04_reports_loaded")
 
 
+def _fill_mui_date_section(page, selector: str, value: int, width: int) -> None:
+    """Focus a MUI DateRangePicker section and type the numeric value.
+
+    MUI sections are contenteditable spinbuttons; selecting all + typing
+    replaces the visible value cleanly.
+    """
+    el = page.locator(selector).first
+    el.click()
+    page.keyboard.press("ControlOrMeta+A")
+    page.keyboard.type(str(value).zfill(width), delay=20)
+
+
 def apply_date_range(page, start: datetime, end: datetime, *, debug: bool) -> None:
-    start_str = start.strftime("%Y-%m-%d")
-    end_str = end.strftime("%Y-%m-%d")
-    log.info("Setting date range %s → %s", start_str, end_str)
+    log.info("Setting date range %s → %s", start.date(), end.date())
 
     try:
-        page.wait_for_selector(SELECTOR_DATE_FROM, timeout=10_000)
-        page.fill(SELECTOR_DATE_FROM, start_str)
-        page.fill(SELECTOR_DATE_TO, end_str)
-        if debug:
-            _shoot(page, "05_dates_filled")
+        page.wait_for_selector(SELECTOR_DATE_START_DAY, timeout=10_000)
     except PWTimeout:
         log.warning(
-            "Date inputs not found by selector — leaving the report at "
-            "its default window. Adjust SELECTOR_DATE_FROM / _TO at the "
-            "top of this file if the report period is wrong."
+            "MUI date sections not found — leaving the report at its "
+            "default window. Inspect the page and adjust the "
+            "SELECTOR_DATE_* constants if the report period is wrong."
         )
+        if debug:
+            _shoot(page, "05_dates_not_found")
         return
+
+    try:
+        # Start side: Day → Month → Year
+        _fill_mui_date_section(page, SELECTOR_DATE_START_DAY, start.day, 2)
+        _fill_mui_date_section(page, SELECTOR_DATE_START_MONTH, start.month, 2)
+        _fill_mui_date_section(page, SELECTOR_DATE_START_YEAR, start.year, 4)
+        # End side
+        _fill_mui_date_section(page, SELECTOR_DATE_END_DAY, end.day, 2)
+        _fill_mui_date_section(page, SELECTOR_DATE_END_MONTH, end.month, 2)
+        _fill_mui_date_section(page, SELECTOR_DATE_END_YEAR, end.year, 4)
+        # Confirm the input so the table reloads.
+        page.keyboard.press("Tab")
+        page.wait_for_load_state("networkidle", timeout=10_000)
+    except Exception as e:
+        log.warning("Failed to type into MUI date sections: %s", e)
+    if debug:
+        _shoot(page, "05_dates_filled")
 
     # Some UIs auto-apply, others need a click.
     try:
@@ -253,9 +297,19 @@ def apply_date_range(page, start: datetime, end: datetime, *, debug: bool) -> No
 
 def download_csv(page, *, debug: bool) -> Path:
     log.info("Triggering CSV download")
-    with page.expect_download(timeout=60_000) as info:
-        page.click(SELECTOR_DOWNLOAD)
-    download = info.value
+    if debug:
+        _shoot(page, "06b_before_download")
+        _dump_html(page, "06b_before_download")
+    try:
+        with page.expect_download(timeout=60_000) as info:
+            page.click(SELECTOR_DOWNLOAD)
+        download = info.value
+    except PWTimeout:
+        log.error("Download/Export button not found. Page elements:")
+        _dump_inputs(page)
+        if debug:
+            _shoot(page, "07_download_not_found")
+        raise
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     suggested = download.suggested_filename or "shop_apotheke_ads.csv"
