@@ -13,7 +13,8 @@ Per-line economics
 
   CM1              = net_revenue − product_cost                  (gross product margin)
 
-  shipping_cost    = dhl_cost(country, peak?) × qty              (€ gross, charged to us)
+  shipping_cost    = dhl_cost(country, peak?), charged ONCE per order
+                     and split across an order's lines by units-share
   shipping_cost_net = shipping_cost / (1 + vat[country])
   commission       = COMMISSION_RATE × gross_revenue             (default 16%)
   three_pl_cost    = per-order fixed (€2.21, spread across lines by qty)
@@ -141,11 +142,15 @@ def compute_line_margins(
 
     df["CM1"] = df["net_revenue"] - df["product_cost"]
 
-    df["dhl_cost"] = df["dhl_unit"] * df["qty"]
+    # DHL bills ONE parcel per order, no matter how many units are inside.
+    # Split that parcel cost across an order's line items by units-share,
+    # same approach we use for per-order 3PL fixed fees below.
+    order_qty = df.groupby("order_id")["qty"].transform("sum")
+    line_share = (df["qty"] / order_qty.replace(0, pd.NA)).fillna(0)
+    df["dhl_cost"] = df["dhl_unit"] * line_share
     df["shipping_cost_net"] = df["dhl_cost"] / (1 + df["vat_rate"])
     df["commission"] = commission_rate * df["gross_revenue"]
 
-    order_qty = df.groupby("order_id")["qty"].transform("sum")
     df["three_pl_cost"] = _three_pl_per_line(df["qty"], order_qty, three_pl_rates)
 
     df["CM2"] = df["CM1"] - df["shipping_cost_net"] - df["commission"] - df["three_pl_cost"]
