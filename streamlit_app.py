@@ -539,18 +539,20 @@ with tab_overview:
                  "commission", "shipping_cost_net", "three_pl_cost",
                  "CM1", "CM2", "ad_spend", "CM3"]].sum(numeric_only=True)
         nr = agg["net_revenue"] or 1  # avoid div-by-zero; absolutes still meaningful
+        # Line-item labels follow the Vegavero Shopify P&L v3 naming so the
+        # marketplace dashboard reads the same as the DTC export.
         pnl = pd.DataFrame([
-            ("Gross revenue",        agg["gross_revenue"],     "+"),
-            ("− Refunds",           -agg["refunded"],           ""),
-            ("Net revenue",          agg["net_revenue"],       "="),
-            ("− Product cost",      -agg["product_cost"],      ""),
-            ("CM1",                  agg["CM1"],               "="),
-            ("− Marketplace commission (16%)", -agg["commission"], ""),
-            ("− Outbound shipping (net)",      -agg["shipping_cost_net"], ""),
-            ("− 3PL fulfillment (Everstock)",  -agg["three_pl_cost"], ""),
-            ("CM2",                  agg["CM2"],               "="),
-            ("− Ad spend",          -agg["ad_spend"],           ""),
-            ("CM3",                  agg["CM3"],               "="),
+            ("Gross Merchandise Value (GMV)",  agg["gross_revenue"], "+"),
+            ("− Returns",                     -agg["refunded"],      ""),
+            ("Net Revenue",                    agg["net_revenue"],   "="),
+            ("− COGS",                        -agg["product_cost"],  ""),
+            ("CM1",                            agg["CM1"],           "="),
+            ("− Marketplace Commission (16%)", -agg["commission"],   ""),
+            ("− Logistics Shipping Costs",    -agg["shipping_cost_net"], ""),
+            ("− Logistics Picking Costs",     -agg["three_pl_cost"], ""),
+            ("CM2",                            agg["CM2"],           "="),
+            ("− Marketing Costs",             -agg["ad_spend"],      ""),
+            ("CM3",                            agg["CM3"],           "="),
         ], columns=["Line", "€", "kind"])
         pnl["%"] = pnl["€"] / nr * 100
 
