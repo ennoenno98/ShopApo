@@ -24,6 +24,10 @@ jobs:
       TIKTOK_ADVERTISER_ID:  ${{ secrets.TIKTOK_ADVERTISER_ID }}
       SA_TECH_EMAIL:         ${{ secrets.SA_TECH_EMAIL }}
       SA_TECH_PASSWORD:      ${{ secrets.SA_TECH_PASSWORD }}
+      GRAPH_TENANT_ID:       ${{ secrets.GRAPH_TENANT_ID }}
+      GRAPH_CLIENT_ID:       ${{ secrets.GRAPH_CLIENT_ID }}
+      GRAPH_CLIENT_SECRET:   ${{ secrets.GRAPH_CLIENT_SECRET }}
+      ONEDRIVE_SHARED_LINK:  ${{ secrets.ONEDRIVE_SHARED_LINK }}
 
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +38,11 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements-export.txt
+
+      - name: Sync ads CSVs from OneDrive
+        if: ${{ env.GRAPH_CLIENT_ID != '' }}
+        continue-on-error: true
+        run: python scripts/onedrive_sync.py
 
       - name: Install Playwright browser
         if: ${{ env.SA_TECH_EMAIL != '' }}
@@ -65,12 +74,12 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-      - name: Commit snapshot to repo (for Streamlit Cloud)
+      - name: Commit snapshot + new ad CSVs to repo (for Streamlit Cloud)
         run: |
-          if [[ -n "$(git status --porcelain exports/)" ]]; then
+          if [[ -n "$(git status --porcelain exports/ inputs/shop_apotheke_ads/)" ]]; then
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add exports/
+            git add exports/ inputs/shop_apotheke_ads/
             git commit -m "data: weekly Shop Apotheke refresh"
             git push
           else
