@@ -90,11 +90,15 @@ def aggregate(line_margins: pd.DataFrame) -> pd.DataFrame:
 def allocate_ads(
     margin: pd.DataFrame, ads: pd.DataFrame, campaign_map: pd.DataFrame
 ) -> pd.DataFrame:
-    """Spread daily ad spend across SKUs.
+    """Spread daily ad spend across SKUs, scoped by country.
 
-    1. (channel, campaign) → SKU rows in the map land 1:1 on that day.
-    2. Whatever spend is left over for that day is split across SKUs in
-       proportion to their net revenue.
+    1. (channel, campaign) → SKU rows in the map land 1:1 on the matching
+       (period, country, sku).
+    2. Whatever spend is left over for that (period, country) is split
+       across SKUs in the same country by net-revenue share.
+
+    The country dimension keeps DE spend on DE SKUs (and AT on AT, etc.)
+    even though sa-tech reports come as one CSV per country.
     """
     if ads.empty:
         margin["ad_spend"] = 0.0
@@ -104,21 +108,27 @@ def allocate_ads(
     ads = ads.copy()
     ads["period"] = pd.to_datetime(ads["period"]).dt.normalize()
 
+    # Legacy ads frames may not carry a country column — fall back to DE
+    # so the join shape stays consistent.
+    if "country" not in ads.columns:
+        ads["country"] = "DE"
+
     direct = ads.merge(campaign_map, on=["channel", "campaign"], how="left")
     mapped = direct.dropna(subset=["sku"]).groupby(
-        ["period", "sku"], as_index=False
+        ["period", "country", "sku"], as_index=False
     )["spend"].sum().rename(columns={"spend": "ad_spend_mapped"})
 
     unmapped_daily = direct[direct["sku"].isna()].groupby(
-        "period", as_index=False
+        ["period", "country"], as_index=False
     )["spend"].sum().rename(columns={"spend": "ad_spend_pool"})
 
-    out = margin.merge(mapped, on=["period", "sku"], how="left")
+    out = margin.merge(mapped, on=["period", "country", "sku"], how="left")
     out["ad_spend_mapped"] = out["ad_spend_mapped"].fillna(0)
 
-    daily_rev = out.groupby("period")["net_revenue"].transform("sum").replace(0, pd.NA)
+    daily_rev = (out.groupby(["period", "country"])["net_revenue"]
+                 .transform("sum").replace(0, pd.NA))
     out["rev_share"] = (out["net_revenue"] / daily_rev).fillna(0)
-    out = out.merge(unmapped_daily, on="period", how="left")
+    out = out.merge(unmapped_daily, on=["period", "country"], how="left")
     out["ad_spend_pool"] = out["ad_spend_pool"].fillna(0)
     out["ad_spend_unmapped"] = out["ad_spend_pool"] * out["rev_share"]
 

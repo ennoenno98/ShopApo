@@ -95,8 +95,9 @@ def _get_with_retry(session: requests.Session, url: str, params: dict,
     return r
 
 
-def _iter_orders(session: requests.Session, base: str, start: datetime, end: datetime) -> Iterator[dict]:
-    """Stream orders from Mirakl OR11, paginating until exhausted."""
+def _iter_orders(session: requests.Session, base: str, start: datetime,
+                 end: datetime, shop_id: str | None = None) -> Iterator[dict]:
+    """Stream orders from Mirakl OR11 for one shop, paginating until exhausted."""
     offset = 0
     while True:
         params = {
@@ -110,6 +111,8 @@ def _iter_orders(session: requests.Session, base: str, start: datetime, end: dat
                 "CLOSED", "REFUSED", "REFUNDED",
             ]),
         }
+        if shop_id:
+            params["shop_id"] = shop_id
         r = _get_with_retry(session, f"{base}/orders", params)
         if not r.ok:
             # Mirakl returns a JSON body on auth/permission errors that
@@ -129,45 +132,87 @@ def _iter_orders(session: requests.Session, base: str, start: datetime, end: dat
         offset += PAGE_SIZE
 
 
+def _parse_shop_ids(raw: str | None) -> list[tuple[str, str]]:
+    """Parse 'DE:3310,AT:3401,IT:3543' into [('DE','3310'), ('AT','3401'), ...].
+
+    Returns an empty list when the env var is unset or blank, in which case
+    the caller falls back to a single un-filtered query (one default shop)."""
+    if not raw:
+        return []
+    out: list[tuple[str, str]] = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if ":" not in piece:
+            log.warning("SHOP_APOTHEKE_SHOP_IDS: ignoring malformed entry %r "
+                        "(expected COUNTRY:ID)", piece)
+            continue
+        country, shop_id = piece.split(":", 1)
+        out.append((country.strip().upper(), shop_id.strip()))
+    return out
+
+
 def fetch(start: datetime, end: datetime) -> pd.DataFrame:
     """Return one row per order line in [start, end].
 
-    Columns: period, order_id, order_line_id, sku, offer_sku, product_title,
+    When `SHOP_APOTHEKE_SHOP_IDS=DE:3310,AT:3401,IT:3543` is set, queries
+    each shop separately and tags rows with the configured country code
+    (overriding the customer shipping country, which we want for marketplace-
+    level VAT / shipping / COGS calculations).
+
+    Columns: period, order_id, order_line_id, sku, product_title,
     qty, gross_revenue, commission, shipping_revenue, customer_country,
     order_state, refunded_amount.
     """
     session, base = _client()
+    shops = _parse_shop_ids(os.environ.get("SHOP_APOTHEKE_SHOP_IDS"))
+    if shops:
+        log.info("Shop Apotheke: querying %d marketplace(s): %s",
+                 len(shops), ", ".join(f"{c}({sid})" for c, sid in shops))
+    else:
+        log.info("Shop Apotheke: SHOP_APOTHEKE_SHOP_IDS not set — querying "
+                 "default shop only (typically DE).")
+        shops = [(None, None)]  # one pass, no shop_id filter
+
     rows: list[dict] = []
-    for o in _iter_orders(session, base, start, end):
-        created = o.get("created_date") or o.get("date_created")
-        period = pd.to_datetime(created, errors="coerce", utc=True)
-        country = _normalize_country(
-            (o.get("customer", {}) or {}).get("shipping_address", {}).get("country")
-        )
-        for line in o.get("order_lines", []) or []:
-            qty = float(line.get("quantity") or 0)
-            unit_price = float(line.get("price_unit") or line.get("price") or 0)
-            line_commission = float(
-                sum((c.get("amount") or 0) for c in line.get("commissions", []) or [])
+    for country_override, shop_id in shops:
+        n_before = len(rows)
+        for o in _iter_orders(session, base, start, end, shop_id=shop_id):
+            created = o.get("created_date") or o.get("date_created")
+            period = pd.to_datetime(created, errors="coerce", utc=True)
+            customer_country = _normalize_country(
+                (o.get("customer", {}) or {}).get("shipping_address", {}).get("country")
             )
-            line_refund = float(
-                sum((r.get("amount") or 0) for r in line.get("refunds", []) or [])
-            )
-            shipping_revenue = float(line.get("shipping_price") or 0)
-            rows.append({
-                "period": period.tz_localize(None) if period is not pd.NaT else pd.NaT,
-                "order_id": o.get("order_id"),
-                "order_line_id": line.get("order_line_id"),
-                "sku": line.get("offer_sku") or line.get("product_sku") or line.get("sku"),
-                "product_title": line.get("product_title"),
-                "qty": qty,
-                "gross_revenue": unit_price * qty,
-                "commission": line_commission,
-                "shipping_revenue": shipping_revenue,
-                "refunded_amount": line_refund,
-                "customer_country": country,
-                "order_state": line.get("order_line_state") or o.get("order_state"),
-            })
+            country = country_override or customer_country
+            for line in o.get("order_lines", []) or []:
+                qty = float(line.get("quantity") or 0)
+                unit_price = float(line.get("price_unit") or line.get("price") or 0)
+                line_commission = float(
+                    sum((c.get("amount") or 0) for c in line.get("commissions", []) or [])
+                )
+                line_refund = float(
+                    sum((r.get("amount") or 0) for r in line.get("refunds", []) or [])
+                )
+                shipping_revenue = float(line.get("shipping_price") or 0)
+                rows.append({
+                    "period": period.tz_localize(None) if period is not pd.NaT else pd.NaT,
+                    "order_id": o.get("order_id"),
+                    "order_line_id": line.get("order_line_id"),
+                    "sku": line.get("offer_sku") or line.get("product_sku") or line.get("sku"),
+                    "product_title": line.get("product_title"),
+                    "qty": qty,
+                    "gross_revenue": unit_price * qty,
+                    "commission": line_commission,
+                    "shipping_revenue": shipping_revenue,
+                    "refunded_amount": line_refund,
+                    "customer_country": country,
+                    "order_state": line.get("order_line_state") or o.get("order_state"),
+                })
+        if shop_id:
+            log.info("  · shop %s (%s): %d order lines",
+                     country_override, shop_id, len(rows) - n_before)
+
     df = pd.DataFrame(rows)
     if df.empty:
         log.info("Shop Apotheke: no orders in window %s → %s", start, end)

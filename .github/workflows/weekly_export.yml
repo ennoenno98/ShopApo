@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SHOP_APOTHEKE_API_KEY: ${{ secrets.SHOP_APOTHEKE_API_KEY }}
+      SHOP_APOTHEKE_SHOP_IDS: ${{ secrets.SHOP_APOTHEKE_SHOP_IDS }}
       BING_DEVELOPER_TOKEN:  ${{ secrets.BING_DEVELOPER_TOKEN }}
       BING_CLIENT_ID:        ${{ secrets.BING_CLIENT_ID }}
       BING_CLIENT_SECRET:    ${{ secrets.BING_CLIENT_SECRET }}

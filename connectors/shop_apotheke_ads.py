@@ -90,6 +90,19 @@ def _to_date(series: pd.Series) -> pd.Series:
                           errors="coerce").dt.normalize()
 
 
+KNOWN_COUNTRIES = {"DE", "AT", "IT", "FR", "NL", "BE", "CH", "ES", "GB", "PL", "SE", "IE"}
+
+
+def _country_from_filename(name: str) -> str:
+    """Extract country tag from filenames like `AT_20260604_103000_xxx.csv`.
+
+    Files uploaded via the dashboard get this prefix automatically. Files
+    that pre-date the prefix (or were committed manually) default to DE,
+    which is what the connector assumed before multi-country support."""
+    head = name.split("_", 1)[0].upper()
+    return head if head in KNOWN_COUNTRIES else "DE"
+
+
 def _load_all() -> pd.DataFrame:
     if not INPUT_DIR.exists():
         raise ConnectorSkipped(f"{INPUT_DIR} does not exist")
@@ -104,6 +117,7 @@ def _load_all() -> pd.DataFrame:
             log.warning("Skipping %s — missing one of date/campaign/spend (cols: %s)",
                         f.name, list(df.columns)[:6])
             continue
+        df["__country"] = _country_from_filename(f.name)
         frames.append(df)
     if not frames:
         raise ConnectorSkipped("no usable CSVs in inputs/shop_apotheke_ads/")
@@ -124,6 +138,7 @@ def fetch(start: datetime, end: datetime) -> pd.DataFrame:
     out = pd.DataFrame({
         "period": _to_date(raw[date_col]),
         "channel": "shop_apotheke_onsite",
+        "country": raw["__country"],
         "campaign": raw[camp_col].astype(str),
         "spend": _to_number(raw[spend_col]),
         "impressions": _to_number(raw[imp_col]) if imp_col else pd.NA,
@@ -139,10 +154,10 @@ def fetch(start: datetime, end: datetime) -> pd.DataFrame:
     if out.empty:
         return pd.DataFrame()
 
-    # Dedup overlapping rows across uploaded CSVs. Same (period, campaign[, ean])
-    # means the same underlying ad — keep the row from the most recently
-    # uploaded file (last in concat order, see _load_all).
-    dedup_keys = ["period", "campaign"] + (["ean"] if ean_col else [])
+    # Dedup overlapping rows across uploaded CSVs. Same (country, period,
+    # campaign[, ean]) means the same underlying ad — keep the row from the
+    # most recently uploaded file (last in concat order, see _load_all).
+    dedup_keys = ["country", "period", "campaign"] + (["ean"] if ean_col else [])
     before = len(out)
     out = out.drop_duplicates(subset=dedup_keys, keep="last")
     if before != len(out):

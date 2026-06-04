@@ -165,8 +165,18 @@ def render_upload_widget() -> None:
                     "Upload disabled — set `GITHUB_TOKEN` in Streamlit secrets to enable."
                 )
                 return
+            country_code = st.selectbox(
+                "Marketplace this CSV is for",
+                ["DE", "AT", "IT", "FR", "NL", "BE", "CH"],
+                help=("sa-tech exports one report per advertiser/country. "
+                      "Pick the marketplace the CSV is for — the file is "
+                      "stored under that country tag so its spend is "
+                      "attributed correctly."),
+                key="ads_upload_country",
+            )
             uploaded = st.file_uploader(
-                "Drop a new sa-tech CSV here (one or more)",
+                "Drop a new sa-tech CSV here (one or more — all tagged "
+                f"as {country_code})",
                 type=["csv"],
                 accept_multiple_files=True,
                 key="ads_upload",
@@ -182,7 +192,7 @@ def render_upload_widget() -> None:
             }
             stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             for f in uploaded:
-                name = f"{stamp}_{f.name}"
+                name = f"{country_code}_{stamp}_{f.name}"
                 url = (f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}"
                        f"/contents/inputs/shop_apotheke_ads/{name}")
                 r = requests.put(
