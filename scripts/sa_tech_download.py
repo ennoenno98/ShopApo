@@ -86,7 +86,10 @@ SELECTOR_RUN_REPORT = (
     'button:has-text("Aktualisieren"), button:has-text("Ausführen")'
 )
 # Download button: literal text in DE/EN, plus icon-button aria-labels.
+# `button:has-text("DOWNLOAD CSV")` matches the exact label we see in the
+# UI; everything else is a fallback if the UI renames it.
 SELECTOR_DOWNLOAD = (
+    'button:has-text("DOWNLOAD CSV"), '
     'a:has-text("Download"), a:has-text("Export"), a:has-text("CSV"), '
     'a:has-text("Herunterladen"), a:has-text("Exportieren"), '
     'button:has-text("Download"), button:has-text("Export"), button:has-text("CSV"), '
