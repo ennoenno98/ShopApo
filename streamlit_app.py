@@ -133,18 +133,49 @@ def _gh_token() -> str | None:
         return os.environ.get("GITHUB_TOKEN")
 
 
+ADS_INPUT_DIR = REPO_ROOT / "inputs" / "shop_apotheke_ads"
+
+
+def _list_ads_files() -> list[tuple[str, datetime, int]]:
+    if not ADS_INPUT_DIR.exists():
+        return []
+    out = []
+    for f in ADS_INPUT_DIR.glob("*.csv"):
+        stat = f.stat()
+        out.append((f.name, datetime.utcfromtimestamp(stat.st_mtime), stat.st_size))
+    return sorted(out, key=lambda x: x[1], reverse=True)
+
+
 def render_upload_widget() -> None:
     token = _gh_token()
     with st.sidebar:
-        with st.expander("📤 Upload sa-tech ads CSV"):
+        with st.expander("📤 Ads CSV uploads"):
+            files = _list_ads_files()
+            if files:
+                st.caption(f"**{len(files)} CSV(s) loaded** in `inputs/shop_apotheke_ads/`")
+                rows = [
+                    {
+                        "file": name,
+                        "uploaded": mtime.strftime("%Y-%m-%d %H:%M UTC"),
+                        "size": f"{size / 1024:.1f} KB",
+                    }
+                    for name, mtime, size in files[:20]
+                ]
+                st.dataframe(pd.DataFrame(rows), hide_index=True,
+                             use_container_width=True)
+                if len(files) > 20:
+                    st.caption(f"…and {len(files) - 20} more.")
+            else:
+                st.caption("No CSVs in `inputs/shop_apotheke_ads/` yet.")
+            st.divider()
+
             if not token:
                 st.caption(
-                    "Disabled — set `GITHUB_TOKEN` in Streamlit secrets to enable. "
-                    "See repo README."
+                    "Upload disabled — set `GITHUB_TOKEN` in Streamlit secrets to enable."
                 )
                 return
             uploaded = st.file_uploader(
-                "Drop the weekly sa-tech CSV here (one or more)",
+                "Drop a new sa-tech CSV here (one or more)",
                 type=["csv"],
                 accept_multiple_files=True,
                 key="ads_upload",
