@@ -1,6 +1,11 @@
 [theme]
 base = "light"
-primaryColor = "#0a8754"
+# Vanatari corporate design tokens (see Vanatari_CoporateDesign_Booklet)
+primaryColor = "#ff5c3e"              # Warm Orange — buttons, focus, primary CTA
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#fbf7f2"  # Light Beige — sidebar, widget wells
+textColor = "#3c1826"                 # Dark Plum — body text
+font = "sans serif"
 
 [server]
 runOnSave = true

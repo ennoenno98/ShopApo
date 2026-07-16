@@ -32,6 +32,62 @@ st.set_page_config(
 )
 
 
+# ---------- Vanatari brand tokens ----------
+# Colours below map 1:1 to the corporate design booklet.
+VNA_PLUM = "#3c1826"
+VNA_PLUM_60 = "#928589"
+VNA_ORANGE = "#ff5c3e"
+VNA_ORANGE_60 = "#ff9d8b"
+VNA_LIGHT_BLUE = "#e3eef6"
+VNA_BEIGE = "#fbf7f2"
+VNA_SECONDARY_BLUE = "#6c91cc"
+VNA_SECONDARY_PINK = "#f5c0fb"
+
+
+# ---------- Vanatari CD stylesheet ----------
+# Loads Literata (serif, headline face) from Google Fonts and applies it to
+# all Streamlit markdown headings. Body copy stays on the system sans-serif
+# stack (Satoshi would be the exact brand pair; the Streamlit host doesn't
+# ship it, so the closest available geometric sans is used).
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Literata:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+    /* Headline face — Literata serif for markdown-rendered headings */
+    [data-testid="stMarkdownContainer"] h1,
+    [data-testid="stMarkdownContainer"] h2,
+    [data-testid="stMarkdownContainer"] h3 {
+        font-family: 'Literata', Georgia, 'Times New Roman', serif !important;
+        color: #3c1826 !important;
+        letter-spacing: -0.01em;
+    }
+    /* Metric labels — plum, small caps feel via letter-spacing */
+    [data-testid="stMetricLabel"] {
+        color: #3c1826 !important;
+        font-weight: 600 !important;
+    }
+    /* Metric value — larger, plum */
+    [data-testid="stMetricValue"] {
+        color: #3c1826 !important;
+    }
+    /* Tab labels: plum default, orange when active */
+    button[data-baseweb="tab"] { color: #3c1826 !important; }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #ff5c3e !important;
+        border-bottom-color: #ff5c3e !important;
+    }
+    /* Filter card border (st.container(border=True)) uses beige rather
+       than the default grey line, matching Vanatari's element separators. */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: #f0e6d9 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
 # ---------- auth ----------
 def _password() -> str | None:
     pw = os.environ.get("DASHBOARD_PASSWORD")
@@ -353,13 +409,18 @@ else:
     show_calculator_only = False
     df = load(path)
 
-# ---------- title bar ----------
+# ---------- title bar (Vanatari signature: Literata serif with orange accent word) ----------
 st.markdown(
-    "<div style='display:flex; align-items:center; gap:14px; "
-    "margin: 4px 0 2px 0;'>"
-    "<span style='font-size:2.4rem; line-height:1;'>📊</span>"
-    "<span style='font-size:2rem; font-weight:700; color:#1A1A1A;'>"
-    "Margin Analytics</span></div>",
+    """
+    <div style='display:flex; align-items:baseline; gap:12px;
+                margin: 4px 0 2px 0;'>
+      <span style="font-family:'Literata',Georgia,serif;
+                   font-size:2.3rem; font-weight:600;
+                   color:#3c1826; letter-spacing:-0.01em; line-height:1;">
+        Margin&nbsp;<span style="color:#ff5c3e;">Analytics.</span>
+      </span>
+    </div>
+    """,
     unsafe_allow_html=True,
 )
 if not show_calculator_only:
@@ -564,7 +625,7 @@ with tab_overview:
 
         def _row_style(row):
             if row.name in subtotal_idx:
-                return ["background:#F2F4F8; font-weight:600"] * len(row)
+                return ["background:#fbf7f2; font-weight:600"] * len(row)
             return [""] * len(row)
 
         st.markdown(f"**Estimated P&L until CM3** — window "
@@ -583,10 +644,13 @@ with tab_overview:
             CM1=("CM1", "sum"), CM2=("CM2", "sum"), CM3=("CM3", "sum"),
             ad_spend=("ad_spend", "sum"),
         )
+        # Vanatari palette: light-blue for the revenue base, Literata-plum /
+        # warm-orange / secondary-blue for the three CM lines.
         fig = go.Figure()
         fig.add_bar(x=daily["period"], y=daily["net_revenue"], name="Net revenue",
-                    marker_color="#0a8754", opacity=0.4)
-        for cm, color in (("CM1", "#1f77b4"), ("CM2", "#ff7f0e"), ("CM3", "#d62728")):
+                    marker_color=VNA_LIGHT_BLUE, opacity=0.9)
+        for cm, color in (("CM1", VNA_ORANGE), ("CM2", VNA_PLUM),
+                            ("CM3", VNA_SECONDARY_BLUE)):
             fig.add_scatter(x=daily["period"], y=daily[cm], name=cm,
                             mode="lines+markers", line=dict(color=color, width=2))
         fig.update_layout(height=360, hovermode="x unified",
@@ -651,7 +715,7 @@ with tab_overview:
                     "SKUs": "{:,.0f}",
                     "Units": "{:,.0f}",
                 }, na_rep="—").apply(
-                    lambda row: ["font-weight:600; background:#F2F4F8"
+                    lambda row: ["font-weight:600; background:#fbf7f2"
                                  if row["Marketplace"] == "Total" else ""] * len(row),
                     axis=1,
                 ).map(_cm3_color, subset=["Country CM3 %"]),
@@ -660,9 +724,9 @@ with tab_overview:
             chart_df = by_c.copy()
             country_fig = go.Figure()
             country_fig.add_bar(x=chart_df["Marketplace"], y=chart_df["Sales (€)"],
-                                name="Sales (€)", marker_color="#1f3864")
+                                name="Sales (€)", marker_color=VNA_PLUM)
             country_fig.add_bar(x=chart_df["Marketplace"], y=chart_df["P&L Impact (€)"],
-                                name="P&L Impact (€)", marker_color="#74AC2A")
+                                name="P&L Impact (€)", marker_color=VNA_ORANGE)
             country_fig.update_layout(barmode="group",
                 yaxis_title="€", height=300,
                 margin=dict(t=20, b=20, l=10, r=10),
@@ -709,10 +773,14 @@ with tab_overview:
         if "active_cluster_code" not in st.session_state:
             st.session_state["active_cluster_code"] = None
 
+        # Semantic bands stay green/red but the neutral bucket uses
+        # Vanatari LIGHT_BLUE (#e3eef6) instead of the previous ad-hoc tint.
         cluster_bg = {
             "1-1": ("#C6EFCE", True),  "1-2": ("#E2F0D9", False), "1-3": ("#E2F0D9", False),
-            "2-1": ("#DEEBF7", False), "2-2": ("#FFFFFF", False), "2-3": ("#FFFFFF", False),
-            "3-1": ("#DEEBF7", False), "3-2": ("#FFFFFF", False), "3-3": ("#F8CBAD", False),
+            "2-1": (VNA_LIGHT_BLUE, False), "2-2": ("#FFFFFF", False),
+            "2-3": ("#FFFFFF", False),
+            "3-1": (VNA_LIGHT_BLUE, False), "3-2": ("#FFFFFF", False),
+            "3-3": ("#F8CBAD", False),
         }
         css_rules = []
         for code, (bg, bold) in cluster_bg.items():
@@ -727,7 +795,7 @@ with tab_overview:
         if active_code:
             cls = f"st-key-cell_{active_code.replace('-', '_')}"
             css_rules.append(
-                f".{cls} button {{ outline:3px solid #1f3864 !important; outline-offset:-3px; }}"
+                f".{cls} button {{ outline:3px solid {VNA_ORANGE} !important; outline-offset:-3px; }}"
             )
         st.markdown(f"<style>{''.join(css_rules)}</style>", unsafe_allow_html=True)
 
@@ -828,7 +896,8 @@ with tab_weekly:
         weekly["ROAS"] = weekly["net_revenue"] / weekly["ad_spend"].replace(0, pd.NA)
 
         fig = px.bar(weekly, x="iso_week", y=["CM1", "CM2", "CM3"], barmode="group",
-                     color_discrete_map={"CM1": "#1f77b4", "CM2": "#ff7f0e", "CM3": "#d62728"})
+                     color_discrete_map={"CM1": VNA_ORANGE, "CM2": VNA_PLUM,
+                                        "CM3": VNA_SECONDARY_BLUE})
         fig.update_layout(height=360, xaxis_title="ISO week", yaxis_title="€",
                           legend=dict(orientation="h", y=-0.15),
                           margin=dict(l=10, r=10, t=10, b=10))
