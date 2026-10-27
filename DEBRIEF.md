@@ -12,6 +12,11 @@ A weekly Streamlit dashboard for our Shop Apotheke marketplace business
 - **Orders** from the Shop Apotheke Mirakl API (one request per country).
 - **On-site ad spend** from sa-tech advertiser reports (CSV uploads).
 
+Tabs: **Overview** (P&L to CM3, countries, clusters), **SKU growth**
+(each SKU vs the previous period or the same period last year, with ad
+spend and TACoS alongside) and **Weekly trend**. Snapshots keep ~25
+months of orders so year-over-year comparisons always have data.
+
 It rebuilds a snapshot every Monday morning via GitHub Actions and
 publishes it to Streamlit Cloud. The dashboard URL is the same one you
 already use.
@@ -35,8 +40,16 @@ countries (`com_…` = DE, `at_…` = AT, `it_…` = IT in the campaign name)
 so one file per export is enough — country comes from each row's
 campaign prefix, not the filename.
 
-`SOLD_OUT_*` campaigns are out-of-stock products; their spend gets
-pooled and split across SKUs by net-revenue share automatically.
+Each sa-tech row carries the product's EAN. The weekly run pulls our
+offer catalogue from Mirakl (OF21) to build an EAN → SKU map
+(`inputs/ean_sku_map.csv`) and puts each row's spend directly on its
+SKU. `SOLD_OUT_*` campaigns (out-of-stock products) and any EAN not in
+the map are pooled and split across SKUs by net-revenue share. The
+**SKU growth** tab shows what share was matched directly.
+
+Ad data only goes as far as the last upload. When the selected period
+runs past it, the dashboard shows a yellow warning — CM3 is overstated
+for those days until newer reports are uploaded.
 
 ## Secrets that have to stay set
 
@@ -89,7 +102,9 @@ inputs/
   vat_rates.csv                   ← per-country VAT
   dhl_rates.csv                   ← per-country DHL shipping
   three_pl_rates.csv              ← Everstock pick rate card
-  campaign_map.csv                ← campaign-name → SKU mapping (optional)
+  campaign_sku_map.csv            ← campaign-name → SKU overrides (optional)
+  ean_sku_map.csv                 ← EAN → SKU, refreshed from Mirakl each run;
+                                    hand-added rows are kept
 exports/
   shopapo_export_YYYY-MM-DD.csv.gz ← what the dashboard reads
   shopapo_export_YYYY-MM-DD.xlsx
@@ -105,6 +120,8 @@ The dashboard always reads the most recent `shopapo_export_*` file in
 - `connectors/shop_apotheke.py` — Mirakl orders fetcher.
 - `connectors/shop_apotheke_ads.py` — sa-tech CSV parser; campaign-
   prefix country detection lives here.
+- `connectors/shop_apotheke_offers.py` — Mirakl offer catalogue →
+  EAN-to-SKU map used for ad attribution.
 - `weekly_export.py` — orchestrator. Combines connectors, runs the
   margin model, writes the snapshot.
 - `margin_model.py` — VAT / DHL / 3PL / commission formulas.

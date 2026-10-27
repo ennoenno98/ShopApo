@@ -16,6 +16,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -133,7 +134,8 @@ def latest_export() -> Path | None:
 
 _FLOAT_COLS = ("gross_revenue", "refunded", "net_revenue", "commission",
                "shipping_cost_net", "product_cost", "dhl_cost",
-               "three_pl_cost", "CM1", "CM2", "CM3", "ad_spend")
+               "three_pl_cost", "CM1", "CM2", "CM3", "ad_spend",
+               "ad_spend_direct", "ad_revenue")
 _INT_COLS = ("orders", "units")
 _CATEGORICAL_COLS = ("sku", "country", "product_title")
 
@@ -156,7 +158,6 @@ def load(path: Path) -> pd.DataFrame:
     # Bake CM%-of-net-revenue once instead of recomputing on every interaction.
     # Use float NaN (not pd.NA) so the division stays in plain float32 — pd.NA
     # produces a nullable Float dtype that won't downcast.
-    import numpy as np
     rev = df["net_revenue"].replace(0, np.nan)
     for cm in ("CM1", "CM2", "CM3"):
         if cm in df.columns:
@@ -432,6 +433,24 @@ if not show_calculator_only:
     )
 
 # ---------- top filter card ----------
+def _bounds(code: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """First and last day of a period code at the selected granularity."""
+    if granularity == "Day":
+        d = pd.Timestamp(code)
+        return d, d
+    if granularity == "Week":
+        yr, wk = code.split("-W")
+        s = pd.Timestamp.fromisocalendar(int(yr), int(wk), 1)
+        return s, s + pd.Timedelta(days=6)
+    if granularity == "Month":
+        s = pd.Timestamp(code + "-01")
+        return s, (s + pd.offsets.MonthEnd(0)).normalize()
+    # Quarter
+    yr, q = code.split("-Q")
+    s = pd.Timestamp(year=int(yr), month=(int(q) - 1) * 3 + 1, day=1)
+    return s, (s + pd.offsets.QuarterEnd(startingMonth=3)).normalize()
+
+
 if not show_calculator_only:
     with st.container(border=True):
         r1 = st.columns([1.6, 1.1, 2.2, 2.2, 1.2])
@@ -461,8 +480,17 @@ if not show_calculator_only:
                 "Month": lambda ym: pd.Timestamp(ym + "-01").strftime("%B %Y"),
                 "Quarter": lambda q: f"Q{q.split('-Q')[1]} · {q.split('-Q')[0]}",
             }[granularity]
+            # Default to the latest *complete* period — the newest one is
+            # usually still running and would compare a few days to a full one.
+            # The export runs mid-day, so its run date is itself partial.
+            data_end = pd.Timestamp(df["period"].max())
+            run_day = pd.to_datetime(path.name[len("shopapo_export_"):][:10],
+                                     errors="coerce")
+            last_full_day = data_end - pd.Timedelta(days=1) \
+                if pd.notna(run_day) and data_end >= run_day else data_end
+            complete = [o for o in options if _bounds(o)[1] <= last_full_day]
             period_selected = st.multiselect(
-                label, options, default=options[:1], format_func=fmt,
+                label, options, default=(complete or options)[:1], format_func=fmt,
                 help=f"Pick one or more {label.lower().rstrip('(s)')}. "
                      "Empty = trailing 28 days.",
             )
@@ -501,65 +529,55 @@ if not show_calculator_only:
             )
 
     # ---------- derive filtered dataframe ----------
-    def _bounds(code: str) -> tuple[pd.Timestamp, pd.Timestamp]:
-        if granularity == "Day":
-            d = pd.Timestamp(code)
-            return d, d
-        if granularity == "Week":
-            yr, wk = code.split("-W")
-            s = pd.Timestamp.fromisocalendar(int(yr), int(wk), 1)
-            return s, s + pd.Timedelta(days=6)
-        if granularity == "Month":
-            s = pd.Timestamp(code + "-01")
-            return s, (s + pd.offsets.MonthEnd(0)).normalize()
-        # Quarter
-        yr, q = code.split("-Q")
-        s = pd.Timestamp(year=int(yr), month=(int(q) - 1) * 3 + 1, day=1)
-        return s, (s + pd.offsets.QuarterEnd(startingMonth=3)).normalize()
-
     if period_selected:
-        mask = pd.Series(False, index=df.index)
-        starts, ends = [], []
-        for code in period_selected:
-            s, e = _bounds(code)
-            mask |= (df["period"] >= s) & (df["period"] <= e)
-            starts.append(s); ends.append(e)
-        f = df[mask].copy()
-        start, end = min(starts), max(ends)
+        windows = [_bounds(code) for code in period_selected]
     else:
         end = pd.Timestamp(df["period"].max())
-        start = end - pd.Timedelta(days=28)
-        f = df[(df["period"] >= start) & (df["period"] <= end)].copy()
+        windows = [(end - pd.Timedelta(days=28), end)]
+    start = min(s for s, _ in windows)
+    end = max(e for _, e in windows)
 
-    if country_sel != ALL:
-        f = f[f["country"] == country_sel]
+    eligible = set(sku_30d[sku_30d >= min_sales].index) if min_sales > 0 else None
 
-    if sku_query:
-        q = sku_query.strip().lower()
-        f = f[
-            f["sku"].astype(str).str.lower().str.contains(q, na=False)
-            | f["product_title"].astype(str).str.lower().str.contains(q, na=False)
-        ]
+    def _scope(wins: list[tuple[pd.Timestamp, pd.Timestamp]]) -> pd.DataFrame:
+        """Rows inside `wins` with the marketplace / SKU / min-sales filters
+        applied — so every comparison window is filtered identically."""
+        mask = pd.Series(False, index=df.index)
+        for s, e in wins:
+            mask |= (df["period"] >= s) & (df["period"] <= e)
+        out = df[mask]
+        if country_sel != ALL:
+            out = out[out["country"] == country_sel]
+        if sku_query:
+            q = sku_query.strip().lower()
+            out = out[
+                out["sku"].astype(str).str.lower().str.contains(q, na=False)
+                | out["product_title"].astype(str).str.lower().str.contains(q, na=False)
+            ]
+        if eligible is not None:
+            out = out[out["sku"].isin(eligible)]
+        return out.copy()
 
-    if min_sales > 0:
-        eligible = set(sku_30d[sku_30d >= min_sales].index)
-        f = f[f["sku"].isin(eligible)]
+    f = _scope(windows)
 
     # Prior equal-length window for KPI deltas.
     span_days = (pd.Timestamp(end) - pd.Timestamp(start)).days + 1
     prev_end = pd.Timestamp(start) - pd.Timedelta(days=1)
     prev_start = prev_end - pd.Timedelta(days=span_days - 1)
-    prev = df[(df["period"] >= prev_start) & (df["period"] <= prev_end)].copy()
-    if country_sel != ALL:
-        prev = prev[prev["country"] == country_sel]
-    if sku_query:
-        q = sku_query.strip().lower()
-        prev = prev[
-            prev["sku"].astype(str).str.lower().str.contains(q, na=False)
-            | prev["product_title"].astype(str).str.lower().str.contains(q, na=False)
-        ]
-    if min_sales > 0:
-        prev = prev[prev["sku"].isin(eligible)]
+    prev = _scope([(prev_start, prev_end)])
+
+    # Ad data arrives via manual sa-tech uploads and can lag the order data.
+    ad_rows = df[df["ad_spend"] > 0] if "ad_spend" in df.columns else df.iloc[0:0]
+    last_ad_day = ad_rows["period"].max() if not ad_rows.empty else None
+    if last_ad_day is None:
+        st.warning("No ad spend data in this snapshot — CM3 equals CM2.", icon="⚠️")
+    elif pd.Timestamp(end) > last_ad_day:
+        st.warning(
+            f"Ad spend data only runs to **{last_ad_day:%d %b %Y}** — days after "
+            "that carry no marketing cost, so CM3 is overstated. Upload the newer "
+            "sa-tech advertiser reports in the sidebar.",
+            icon="⚠️",
+        )
 
 
 # ============================ KPIs ============================
@@ -592,7 +610,8 @@ if not show_calculator_only:
 
 
 # ============================ TABS ============================
-tab_overview, tab_weekly = st.tabs(["Overview", "Weekly trend"])
+tab_overview, tab_growth, tab_weekly = st.tabs(
+    ["Overview", "SKU growth", "Weekly trend"])
 
 # ---- Overview ----
 with tab_overview:
@@ -878,6 +897,281 @@ with tab_overview:
             f"{len(view)} SKUs · Δ CM3% in percentage points vs the previous "
             f"{span_days}-day window ({prev_start.date()} → {prev_end.date()})."
         )
+
+# ---- SKU growth ----
+GROWTH_STATUSES = ["▲ Growing", "🆕 New", "＝ Flat", "▼ Declining", "⛔ Lost"]
+GROWTH_COLORS = {"▲ Growing": VNA_SECONDARY_BLUE, "🆕 New": VNA_SECONDARY_PINK,
+                 "＝ Flat": VNA_PLUM_60, "▼ Declining": VNA_ORANGE,
+                 "⛔ Lost": VNA_PLUM}
+
+with tab_growth:
+    if show_calculator_only:
+        st.info("Snapshot not available.")
+    else:
+        g = st.columns(2)
+        with g[0]:
+            basis = st.radio("Compare against",
+                             ["Previous period", "Same period last year"],
+                             horizontal=True, key="growth_basis")
+        with g[1]:
+            rank_by = st.radio("Rank movers by", ["Net revenue", "CM3", "Units"],
+                               horizontal=True, key="growth_rank")
+
+        latest = max(range(len(windows)), key=lambda i: windows[i][1])
+        if basis == "Previous period":
+            selected_days = sum((e - s).days + 1 for s, e in windows)
+            contiguous = selected_days == span_days
+            if period_selected and granularity in ("Month", "Quarter"):
+                # Calendar periods → the preceding calendar month(s)/quarter(s).
+                step = pd.DateOffset(months=1 if granularity == "Month" else 3)
+                if contiguous:
+                    comp_windows = [(start - step * len(windows),
+                                     start - pd.Timedelta(days=1))]
+                    latest = 0
+                else:
+                    comp_windows = [(s - step, s - pd.Timedelta(days=1))
+                                    for s, e in windows]
+            elif contiguous:
+                # One continuous stretch → the stretch right before it.
+                comp_windows = [(prev_start, prev_end)]
+                latest = 0
+            else:
+                # Non-adjacent picks (e.g. May + Sep) → each one vs the
+                # equally long stretch right before it.
+                comp_windows = [(s - (e - s) - pd.Timedelta(days=1),
+                                 s - pd.Timedelta(days=1)) for s, e in windows]
+        else:
+            # 364 days keeps weekdays (and ISO weeks) aligned; calendar
+            # months/quarters shift by a calendar year instead.
+            if period_selected and granularity in ("Month", "Quarter"):
+                shift = lambda d: d - pd.DateOffset(years=1)
+            else:
+                shift = lambda d: d - pd.Timedelta(days=364)
+            comp_windows = [(shift(s), shift(e)) for s, e in windows]
+
+        # A still-running period (e.g. this week) only has a few days of
+        # data — compare it with the same number of days, not a full period.
+        cur_end_shown = min(pd.Timestamp(end), data_end)
+        gap = (pd.Timestamp(end) - data_end).days
+        if gap > 0:
+            s, e = comp_windows[latest]
+            cur_s = windows[latest][0] if len(comp_windows) == len(windows) else start
+            comp_windows[latest] = (s, min(e, s + (data_end - cur_s)))
+        comp = _scope(comp_windows)
+
+        comp_start = min(s for s, _ in comp_windows)
+        comp_end = max(e for _, e in comp_windows)
+
+        def _span_text(wins):
+            return " + ".join(f"{s:%d %b %Y} → {e:%d %b %Y}" for s, e in sorted(wins))
+
+        cur_shown = [(s, min(e, cur_end_shown)) for s, e in windows]
+        st.caption(f"Current **{_span_text(cur_shown)}** vs "
+                   f"**{_span_text(comp_windows)}** · "
+                   "marketplace, SKU and min-sales filters apply to both."
+                   + (" The current period is still running, so the comparison "
+                      "is trimmed to the same days." if gap > 0 else ""))
+
+        data_start = df["period"].min()
+        if comp.empty:
+            st.info(f"No sales in the comparison window — the snapshot starts "
+                    f"{data_start:%d %b %Y}. Pick a later period or compare "
+                    "against the previous period.")
+        else:
+            if comp_start < data_start:
+                st.caption(f"⚠️ Comparison window starts before the snapshot "
+                           f"({data_start:%d %b %Y}), so it is only partly covered.")
+
+            agg_cols = [c for c in ("units", "net_revenue", "CM3", "ad_spend", "ad_revenue")
+                        if c in df.columns]
+
+            def _per_sku(frame: pd.DataFrame) -> pd.DataFrame:
+                return frame.groupby("sku", observed=True)[agg_cols].sum()
+
+            gr = _per_sku(f).join(_per_sku(comp), how="outer", rsuffix="_prev").fillna(0)
+            titles = (pd.concat([f[["sku", "product_title"]], comp[["sku", "product_title"]]])
+                      .astype(str).groupby("sku")["product_title"].first()
+                      .replace("nan", ""))
+            gr.index = gr.index.astype(str)
+            gr = gr[(gr[["net_revenue", "net_revenue_prev", "ad_spend", "ad_spend_prev"]]
+                     != 0).any(axis=1)]
+
+            def _pct(num, den):
+                return num / den.replace(0, np.nan) * 100
+
+            gr["Δ revenue €"] = gr["net_revenue"] - gr["net_revenue_prev"]
+            gr["Δ revenue %"] = _pct(gr["Δ revenue €"], gr["net_revenue_prev"])
+            gr["Δ units"] = gr["units"] - gr["units_prev"]
+            gr["Δ CM3 €"] = gr["CM3"] - gr["CM3_prev"]
+            gr["CM3 %"] = _pct(gr["CM3"], gr["net_revenue"])
+            gr["Δ CM3 pp"] = gr["CM3 %"] - _pct(gr["CM3_prev"], gr["net_revenue_prev"])
+            gr["Δ ad spend €"] = gr["ad_spend"] - gr["ad_spend_prev"]
+            gr["Δ ad spend %"] = _pct(gr["Δ ad spend €"], gr["ad_spend_prev"])
+            gr["TACoS %"] = _pct(gr["ad_spend"], gr["net_revenue"])
+            gr["Δ TACoS pp"] = gr["TACoS %"] - _pct(gr["ad_spend_prev"], gr["net_revenue_prev"])
+            if "ad_revenue" in gr.columns:
+                gr["ROAS"] = gr["ad_revenue"] / gr["ad_spend"].replace(0, np.nan)
+
+            pct = gr["Δ revenue %"]
+            gr["Status"] = np.select(
+                [(gr["net_revenue_prev"] <= 0) & (gr["net_revenue"] > 0),
+                 (gr["net_revenue"] <= 0) & (gr["net_revenue_prev"] > 0),
+                 pct >= 5, pct <= -5],
+                ["🆕 New", "⛔ Lost", "▲ Growing", "▼ Declining"],
+                default="＝ Flat",
+            )
+
+            # ---- headline numbers ----
+            rev_c, rev_p = gr["net_revenue"].sum(), gr["net_revenue_prev"].sum()
+            cm3_c, cm3_p = gr["CM3"].sum(), gr["CM3_prev"].sum()
+            ad_c, ad_p = gr["ad_spend"].sum(), gr["ad_spend_prev"].sum()
+            counts = gr["Status"].value_counts()
+            up = int(counts.get("▲ Growing", 0) + counts.get("🆕 New", 0))
+            down = int(counts.get("▼ Declining", 0) + counts.get("⛔ Lost", 0))
+            k = st.columns(4)
+            k[0].metric("Net revenue", f"€{rev_c:,.0f}",
+                        f"{(rev_c - rev_p) / rev_p * 100:+.1f}%" if rev_p else None)
+            k[1].metric("CM3", f"€{cm3_c:,.0f}", f"{cm3_c - cm3_p:+,.0f} €")
+            k[2].metric("SKUs growing / declining", f"{up} / {down}",
+                        help="Growing and Declining = revenue moved by 5% or more; "
+                             "New / Lost SKUs are counted in with them.")
+            if rev_c and rev_p and (ad_c or ad_p):
+                k[3].metric("TACoS (ad spend ÷ revenue)", f"{ad_c / rev_c * 100:.1f}%",
+                            f"{(ad_c / rev_c - ad_p / rev_p) * 100:+.1f} pp",
+                            delta_color="inverse")
+
+            # ---- revenue bridge + top movers ----
+            left, right = st.columns(2)
+            with left:
+                st.markdown("**Where the revenue change came from**")
+                bridge = [("▲ Growing", "Growing"), ("🆕 New", "New"),
+                          ("▼ Declining", "Declining"), ("⛔ Lost", "Lost"),
+                          ("＝ Flat", "Flat")]
+                steps = [float(gr.loc[gr["Status"] == s, "Δ revenue €"].sum())
+                         for s, _ in bridge]
+                wf = go.Figure(go.Waterfall(
+                    x=["Comparison"] + [lbl for _, lbl in bridge] + ["Current"],
+                    measure=["absolute"] + ["relative"] * len(bridge) + ["total"],
+                    y=[rev_p] + steps + [0],
+                    text=[f"€{v:,.0f}" for v in [rev_p] + steps + [rev_c]],
+                    textposition="outside",
+                    increasing={"marker": {"color": VNA_SECONDARY_BLUE}},
+                    decreasing={"marker": {"color": VNA_ORANGE}},
+                    totals={"marker": {"color": VNA_PLUM}},
+                    connector={"line": {"color": VNA_PLUM_60, "width": 1}},
+                ))
+                wf.update_layout(height=380, showlegend=False, yaxis_title="€",
+                                 margin=dict(l=10, r=10, t=30, b=10))
+                st.plotly_chart(wf, use_container_width=True)
+
+            with right:
+                rank_col = {"Net revenue": "Δ revenue €", "CM3": "Δ CM3 €",
+                            "Units": "Δ units"}[rank_by]
+                st.markdown(f"**Top movers · {rank_col}**")
+                movers = pd.concat([gr.nlargest(8, rank_col), gr.nsmallest(8, rank_col)])
+                movers = movers[~movers.index.duplicated() & (movers[rank_col] != 0)]
+                movers = movers.sort_values(rank_col)
+                labels = [f"{s} · {str(titles.get(s, ''))[:28]}" for s in movers.index]
+                mv = go.Figure(go.Bar(
+                    x=movers[rank_col], y=labels, orientation="h",
+                    marker_color=np.where(movers[rank_col] >= 0,
+                                          VNA_SECONDARY_BLUE, VNA_ORANGE),
+                    hovertemplate="%{y}<br>%{x:,.0f}<extra></extra>",
+                ))
+                mv.update_layout(height=380, margin=dict(l=10, r=10, t=30, b=10),
+                                 xaxis_title=rank_col)
+                st.plotly_chart(mv, use_container_width=True)
+
+            # ---- did growth come from ads? ----
+            st.markdown("**Did growth come from ads?** Each bubble is a SKU — "
+                        "change in ad spend vs change in revenue, sized by current revenue.")
+            sc = gr.reset_index(names="SKU")
+            sc["Product"] = sc["SKU"].map(titles)
+            sc["size"] = sc["net_revenue"].clip(lower=0) + 1
+            fig = px.scatter(
+                sc, x="Δ ad spend €", y="Δ revenue €", size="size", size_max=38,
+                color="Status", color_discrete_map=GROWTH_COLORS,
+                category_orders={"Status": GROWTH_STATUSES},
+                hover_name="SKU",
+                hover_data={"Product": True, "size": False, "TACoS %": ":.1f",
+                            "Δ ad spend €": ":,.0f", "Δ revenue €": ":,.0f"},
+            )
+            fig.add_hline(y=0, line_color=VNA_PLUM_60, line_width=1)
+            fig.add_vline(x=0, line_color=VNA_PLUM_60, line_width=1)
+            for x, y, txt in [(0.02, 0.98, "Grew while cutting ads ✓"),
+                              (0.98, 0.98, "Grew with more ads"),
+                              (0.98, 0.02, "More ads, less revenue ✗"),
+                              (0.02, 0.02, "Cut ads, lost revenue")]:
+                fig.add_annotation(x=x, y=y, xref="paper", yref="paper", text=txt,
+                                   showarrow=False, font=dict(color=VNA_PLUM_60, size=11),
+                                   xanchor="left" if x < 0.5 else "right",
+                                   yanchor="top" if y > 0.5 else "bottom")
+            fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10),
+                              legend=dict(orientation="h", y=-0.15, title=None))
+            st.plotly_chart(fig, use_container_width=True)
+
+            ads_note = []
+            if "ad_spend_direct" in f.columns and f["ad_spend"].sum():
+                direct = f["ad_spend_direct"].sum() / f["ad_spend"].sum() * 100
+                ads_note.append(
+                    f"{direct:.0f}% of this window's ad spend is matched to its SKU "
+                    "via EAN; the rest (SOLD_OUT campaigns, unmatched EANs) is "
+                    "split by revenue share.")
+            else:
+                ads_note.append(
+                    "Ad spend is currently split across SKUs by revenue share — "
+                    "per-SKU ad figures become exact after the next weekly run "
+                    "(EAN matching).")
+            if last_ad_day is None or comp_end > last_ad_day or end > last_ad_day:
+                ads_note.append("Ad data doesn't fully cover both windows, so ad "
+                                "deltas and TACoS are not like-for-like.")
+            st.caption(" ".join(ads_note))
+
+            # ---- SKU table ----
+            status_sel = st.multiselect("Show SKUs", GROWTH_STATUSES,
+                                        default=GROWTH_STATUSES, key="growth_status")
+            view = (gr[gr["Status"].isin(status_sel)]
+                    .sort_values(rank_col, ascending=False)
+                    .reset_index(names="SKU"))
+            view.insert(2, "Product", view["SKU"].map(titles))
+            view = view.rename(columns={
+                "units": "Units", "net_revenue": "Revenue €",
+                "net_revenue_prev": "Prev revenue €", "CM3": "CM3 €",
+                "ad_spend": "Ad spend €"})
+            cols = ["SKU", "Status", "Product", "Units", "Δ units", "Revenue €",
+                    "Prev revenue €", "Δ revenue €", "Δ revenue %", "CM3 €",
+                    "Δ CM3 €", "CM3 %", "Δ CM3 pp", "Ad spend €", "Δ ad spend %",
+                    "TACoS %", "Δ TACoS pp"] + (["ROAS"] if "ROAS" in view else [])
+            num_cols = [c for c in cols if c not in ("SKU", "Status", "Product")]
+            view[num_cols] = view[num_cols].astype("float64")  # None → NaN → "—"
+
+            def _good_bad(v, invert=False):
+                if pd.isna(v) or v == 0:
+                    return ""
+                good = (v > 0) != invert
+                return f"color:{'#2E7D32' if good else '#C62828'}; font-weight:600"
+
+            styled = (view[cols].style
+                      .format({"Units": "{:,.0f}", "Δ units": "{:+,.0f}",
+                               "Revenue €": "€{:,.0f}", "Prev revenue €": "€{:,.0f}",
+                               "Δ revenue €": "€{:+,.0f}", "Δ revenue %": "{:+.1f}%",
+                               "CM3 €": "€{:,.0f}", "Δ CM3 €": "€{:+,.0f}",
+                               "CM3 %": "{:.1f}%", "Δ CM3 pp": "{:+.1f} pp",
+                               "Ad spend €": "€{:,.0f}", "Δ ad spend %": "{:+.1f}%",
+                               "TACoS %": "{:.1f}%", "Δ TACoS pp": "{:+.1f} pp",
+                               "ROAS": "{:.2f}×"}, na_rep="—")
+                      .map(_good_bad, subset=["Δ units", "Δ revenue €", "Δ revenue %",
+                                              "Δ CM3 €", "Δ CM3 pp"])
+                      .map(lambda v: _good_bad(v, invert=True), subset=["Δ TACoS pp"])
+                      .map(lambda s: f"color:{GROWTH_COLORS.get(s, VNA_PLUM)}; "
+                                     "font-weight:600", subset=["Status"]))
+            st.dataframe(styled, use_container_width=True, hide_index=True, height=520)
+            st.download_button(
+                "⬇ Download growth table (CSV)",
+                view[cols].to_csv(index=False).encode("utf-8"),
+                file_name=f"shopapo_sku_growth_{start:%Y%m%d}_{end:%Y%m%d}.csv",
+                mime="text/csv",
+            )
 
 # ---- Weekly trend ----
 with tab_weekly:

@@ -25,7 +25,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from connectors import ConnectorSkipped, shop_apotheke, shop_apotheke_ads, bing_ads, tiktok_ads
+from connectors import (ConnectorSkipped, shop_apotheke, shop_apotheke_ads,
+                        shop_apotheke_offers, bing_ads, tiktok_ads)
 from margin_model import (
     compute_line_margins,
     load_cogs,
@@ -88,53 +89,91 @@ def aggregate(line_margins: pd.DataFrame) -> pd.DataFrame:
 
 
 def allocate_ads(
-    margin: pd.DataFrame, ads: pd.DataFrame, campaign_map: pd.DataFrame
+    margin: pd.DataFrame, ads: pd.DataFrame, campaign_map: pd.DataFrame,
+    ean_map: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Spread daily ad spend across SKUs, scoped by country.
+    """Put daily ad spend (and attributed ad revenue) on SKUs, by country.
 
-    1. (channel, campaign) → SKU rows in the map land 1:1 on the matching
-       (period, country, sku).
-    2. Whatever spend is left over for that (period, country) is split
-       across SKUs in the same country by net-revenue share.
+    1. (channel, campaign) rows in `campaign_map` land 1:1 on that SKU.
+    2. Remaining rows with an EAN in `ean_map` land on that EAN's SKU —
+       except SOLD_OUT_ campaigns, which promote out-of-stock products and
+       are deliberately treated as shared cost.
+    3. Whatever is left for a (period, country) is split across that
+       country's SKUs by net-revenue share.
 
-    The country dimension keeps DE spend on DE SKUs (and AT on AT, etc.)
-    even though sa-tech reports come as one CSV per country.
+    Directly attributed spend on a SKU-day without sales is kept as a
+    zero-revenue row, so the cost still shows up in that SKU's CM3.
+    Adds ad_spend, ad_spend_direct (the directly attributed part),
+    ad_revenue and CM3.
     """
     if ads.empty:
-        margin["ad_spend"] = 0.0
+        for c in ("ad_spend", "ad_spend_direct", "ad_revenue"):
+            margin[c] = 0.0
         margin["CM3"] = margin["CM2"]
         return margin
 
     ads = ads.copy()
     ads["period"] = pd.to_datetime(ads["period"]).dt.normalize()
+    ads["spend"] = pd.to_numeric(ads["spend"], errors="coerce").fillna(0)
+    ads["ad_revenue"] = (pd.to_numeric(ads["ad_revenue"], errors="coerce").fillna(0)
+                         if "ad_revenue" in ads.columns else 0.0)
 
     # Legacy ads frames may not carry a country column — fall back to DE
     # so the join shape stays consistent.
     if "country" not in ads.columns:
         ads["country"] = "DE"
 
-    direct = ads.merge(campaign_map, on=["channel", "campaign"], how="left")
-    mapped = direct.dropna(subset=["sku"]).groupby(
-        ["period", "country", "sku"], as_index=False
-    )["spend"].sum().rename(columns={"spend": "ad_spend_mapped"})
+    ads = ads.merge(campaign_map, on=["channel", "campaign"], how="left")
+    if ean_map is not None and not ean_map.empty and "ean" in ads.columns:
+        from connectors.shop_apotheke_offers import normalize_ean
+        sold_out = ads["campaign"].astype(str).str.lower().str.startswith("sold_out_")
+        by_ean = ads["ean"].map(normalize_ean).map(
+            ean_map.set_index("ean")["sku"].to_dict())
+        ads["sku"] = ads["sku"].fillna(by_ean.where(~sold_out))
 
-    unmapped_daily = direct[direct["sku"].isna()].groupby(
-        ["period", "country"], as_index=False
-    )["spend"].sum().rename(columns={"spend": "ad_spend_pool"})
+    keys = ["period", "country", "sku"]
+    direct = (ads.dropna(subset=["sku"]).groupby(keys, as_index=False)
+              [["spend", "ad_revenue"]].sum()
+              .rename(columns={"spend": "ad_spend_direct",
+                               "ad_revenue": "ad_revenue_direct"}))
+    pool = (ads[ads["sku"].isna()].groupby(["period", "country"], as_index=False)
+            [["spend", "ad_revenue"]].sum()
+            .rename(columns={"spend": "spend_pool", "ad_revenue": "ad_revenue_pool"}))
 
-    out = margin.merge(mapped, on=["period", "country", "sku"], how="left")
-    out["ad_spend_mapped"] = out["ad_spend_mapped"].fillna(0)
+    out = margin.merge(direct, on=keys, how="outer", indicator=True)
+    # Spend on SKU-days without any sale: keep as zero-revenue rows.
+    orphan = out["_merge"] == "right_only"
+    if orphan.any():
+        titles = margin.groupby("sku")["product_title"].first()
+        out.loc[orphan, "product_title"] = out.loc[orphan, "sku"].map(titles)
+        num = [c for c in margin.columns
+               if c not in keys + ["product_title"]
+               and pd.api.types.is_numeric_dtype(margin[c])]
+        out.loc[orphan, num] = 0
+        log.info("Ads: %d SKU-day(s) had direct ad spend but no sales "
+                 "(€%.0f) — kept as zero-revenue rows",
+                 int(orphan.sum()), out.loc[orphan, "ad_spend_direct"].sum())
+    out = out.drop(columns="_merge")
+    out[["ad_spend_direct", "ad_revenue_direct"]] = (
+        out[["ad_spend_direct", "ad_revenue_direct"]].fillna(0))
 
     daily_rev = (out.groupby(["period", "country"])["net_revenue"]
                  .transform("sum").replace(0, pd.NA))
     out["rev_share"] = (out["net_revenue"] / daily_rev).fillna(0)
-    out = out.merge(unmapped_daily, on=["period", "country"], how="left")
-    out["ad_spend_pool"] = out["ad_spend_pool"].fillna(0)
-    out["ad_spend_unmapped"] = out["ad_spend_pool"] * out["rev_share"]
+    out = out.merge(pool, on=["period", "country"], how="left")
+    out[["spend_pool", "ad_revenue_pool"]] = out[["spend_pool", "ad_revenue_pool"]].fillna(0)
 
-    out["ad_spend"] = out["ad_spend_mapped"] + out["ad_spend_unmapped"]
+    out["ad_spend"] = out["ad_spend_direct"] + out["spend_pool"] * out["rev_share"]
+    out["ad_revenue"] = out["ad_revenue_direct"] + out["ad_revenue_pool"] * out["rev_share"]
     out["CM3"] = out["CM2"] - out["ad_spend"]
-    return out.drop(columns=["ad_spend_mapped", "ad_spend_pool", "ad_spend_unmapped", "rev_share"])
+
+    total = ads["spend"].sum()
+    if total:
+        log.info("Ads: €%.0f total · %.0f%% attributed directly to SKUs, "
+                 "rest split by revenue share",
+                 total, out["ad_spend_direct"].sum() / total * 100)
+    return out.drop(columns=["ad_revenue_direct", "spend_pool",
+                             "ad_revenue_pool", "rev_share"])
 
 
 def write_snapshot(margin: pd.DataFrame, ads: pd.DataFrame, run_date: datetime) -> Path:
@@ -186,10 +225,11 @@ def run(start: datetime, end: datetime, run_date: datetime) -> Path:
     vat = load_vat()
     dhl = load_dhl()
     campaign_map = load_campaign_map()
+    ean_map = shop_apotheke_offers.load_ean_map()
 
     line_margins = compute_line_margins(orders, cogs, vat, dhl)
     margin = aggregate(line_margins)
-    margin = allocate_ads(margin, ads, campaign_map)
+    margin = allocate_ads(margin, ads, campaign_map, ean_map)
     margin = margin.sort_values(["period", "net_revenue"], ascending=[False, False])
 
     path = write_snapshot(margin, ads, run_date)
@@ -200,14 +240,14 @@ def run(start: datetime, end: datetime, run_date: datetime) -> Path:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--once", action="store_true",
-                   help="Run a single export for the trailing 12 months and exit.")
-    p.add_argument("--start", type=str, help="ISO date (default: 12 months ago)")
+                   help="Run a single export for the trailing ~25 months and exit.")
+    p.add_argument("--start", type=str, help="ISO date (default: ~25 months ago, so every recent period has a year-ago comparison)")
     p.add_argument("--end", type=str, help="ISO date (default: today)")
     args = p.parse_args()
 
     end = pd.to_datetime(args.end).to_pydatetime() if args.end else datetime.utcnow()
     start = (pd.to_datetime(args.start).to_pydatetime() if args.start
-             else end - timedelta(days=365))
+             else end - timedelta(days=760))
 
     run(start, end, run_date=datetime.utcnow())
 
